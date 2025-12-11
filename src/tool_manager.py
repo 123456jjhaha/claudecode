@@ -79,8 +79,17 @@ class ToolManager:
                 # 在模块中查找带 @tool 装饰器的函数
                 module_tools = self._extract_tools_from_module(module, module_name)
 
+                # 为每个工具添加模块前缀到 name 中
+                for tool in module_tools:
+                    if SdkMcpTool is not None and isinstance(tool, SdkMcpTool):
+                        # 保存原始名称用于日志
+                        original_name = tool.name
+                        # 修改工具名称，添加模块前缀
+                        tool.name = f"{module_name}__{tool.name}"
+                        logger.debug(f"工具名称添加模块前缀: {original_name} -> {tool.name}")
+
                 tools.extend(module_tools)
-                tool_names.extend([self._get_tool_name(t, module_name) for t in module_tools])
+                tool_names.extend([t.name for t in module_tools])
 
             self._tools = tools
             self._tool_names = tool_names

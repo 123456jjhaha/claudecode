@@ -32,8 +32,9 @@ async def add(args: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         工具执行结果
     """
-    a = args.get("a", 0)
-    b = args.get("b", 0)
+    # 确保参数是数字类型
+    a = float(args.get("a", 0))
+    b = float(args.get("b", 0))
     result = a + b
 
     return {
@@ -68,8 +69,9 @@ async def multiply(args: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         工具执行结果
     """
-    a = args.get("a", 1)
-    b = args.get("b", 1)
+    # 确保参数是数字类型
+    a = float(args.get("a", 1))
+    b = float(args.get("b", 1))
     result = a * b
 
     return {
@@ -104,8 +106,9 @@ async def divide(args: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         工具执行结果
     """
-    a = args.get("a", 0)
-    b = args.get("b", 1)
+    # 确保参数是数字类型
+    a = float(args.get("a", 0))
+    b = float(args.get("b", 1))
 
     if b == 0:
         return {
@@ -150,8 +153,9 @@ async def power(args: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         工具执行结果
     """
-    base = args.get("base", 0)
-    exponent = args.get("exponent", 1)
+    # 确保参数是数字类型
+    base = float(args.get("base", 0))
+    exponent = float(args.get("exponent", 1))
     result = base ** exponent
 
     return {

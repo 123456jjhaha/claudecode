@@ -139,7 +139,15 @@ class AgentSystem:
             # 注意：SDK 服务器优先级更高，防止被 .mcp.json 中的同名配置覆盖
             all_mcp_servers = merge_mcp_configs(sdk_mcp_servers, external_mcp_servers)
 
-            # 5. 生成最终的 ClaudeAgentOptions
+            # 5. 展开工具权限配置中的通配符
+            logger.info("处理工具权限配置...")
+            all_mcp_tool_names = self._collect_all_mcp_tool_names(
+                custom_tools_server,
+                sub_instances_server
+            )
+            self._expand_tool_permissions(options_dict, all_mcp_tool_names)
+
+            # 6. 生成最终的 ClaudeAgentOptions
             logger.info("生成 ClaudeAgentOptions...")
 
             # 移除内部使用的自定义字段
@@ -161,6 +169,98 @@ class AgentSystem:
             if isinstance(e, AgentSystemError):
                 raise
             raise AgentSystemError(f"初始化失败: {e}")
+
+    def _collect_all_mcp_tool_names(
+        self,
+        custom_tools_server: Any,
+        sub_instances_server: Any
+    ) -> list[str]:
+        """
+        收集所有 MCP 工具的完整名称
+
+        Args:
+            custom_tools_server: 本地工具 MCP 服务器
+            sub_instances_server: 子实例 MCP 服务器
+
+        Returns:
+            所有 MCP 工具名称列表
+        """
+        from fnmatch import fnmatch
+
+        all_tool_names = []
+
+        # 1. 收集本地自定义工具
+        if custom_tools_server is not None and self.tool_manager:
+            local_tool_names = self.tool_manager.get_tool_names()
+            for tool_name in local_tool_names:
+                full_name = f"mcp__custom_tools__{tool_name}"
+                all_tool_names.append(full_name)
+            logger.debug(f"收集到 {len(local_tool_names)} 个本地工具")
+
+        # 2. 收集子实例工具
+        if sub_instances_server is not None and self.instance_manager:
+            sub_tool_names = self.instance_manager.get_tool_names()
+            for tool_name in sub_tool_names:
+                full_name = f"mcp__sub_instances__{tool_name}"
+                all_tool_names.append(full_name)
+            logger.debug(f"收集到 {len(sub_tool_names)} 个子实例工具")
+
+        # TODO: 3. 收集外部 MCP 服务器的工具（如果需要的话）
+        # 外部 MCP 服务器的工具名需要在运行时从服务器获取，
+        # 这里暂时不处理，可以在后续版本中添加
+
+        logger.info(f"总共收集到 {len(all_tool_names)} 个 MCP 工具")
+        return all_tool_names
+
+    def _expand_tool_permissions(
+        self,
+        options_dict: dict[str, Any],
+        all_mcp_tool_names: list[str]
+    ) -> None:
+        """
+        展开工具权限配置中的通配符模式
+
+        Args:
+            options_dict: ClaudeAgentOptions 配置字典
+            all_mcp_tool_names: 所有 MCP 工具名称列表
+        """
+        from fnmatch import fnmatch
+
+        # 展开 allowed_tools
+        if "allowed_tools" in options_dict:
+            allowed_patterns = options_dict["allowed_tools"]
+            expanded_allowed = []
+
+            for pattern in allowed_patterns:
+                if "*" in pattern or "?" in pattern:
+                    # 通配符模式，需要展开
+                    matched = [name for name in all_mcp_tool_names if fnmatch(name, pattern)]
+                    expanded_allowed.extend(matched)
+                    logger.debug(f"通配符 '{pattern}' 匹配到 {len(matched)} 个工具")
+                else:
+                    # 具体工具名，直接添加
+                    expanded_allowed.append(pattern)
+
+            options_dict["allowed_tools"] = expanded_allowed
+            logger.info(f"展开后的 allowed_tools 包含 {len(expanded_allowed)} 个工具")
+
+        # 展开 disallowed_tools（如果需要的话）
+        if "disallowed_tools" in options_dict:
+            disallowed_patterns = options_dict["disallowed_tools"]
+            expanded_disallowed = []
+
+            for pattern in disallowed_patterns:
+                if "*" in pattern or "?" in pattern:
+                    # 通配符模式，需要展开
+                    matched = [name for name in all_mcp_tool_names if fnmatch(name, pattern)]
+                    expanded_disallowed.extend(matched)
+                    logger.debug(f"通配符 '{pattern}' 匹配到 {len(matched)} 个工具")
+                else:
+                    # 具体工具名，直接添加
+                    expanded_disallowed.append(pattern)
+
+            options_dict["disallowed_tools"] = expanded_disallowed
+            logger.info(f"展开后的 disallowed_tools 包含 {len(expanded_disallowed)} 个工具")
 
     async def query(self, prompt: str) -> AsyncIterator[Any]:
         """

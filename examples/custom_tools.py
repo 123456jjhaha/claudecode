@@ -38,6 +38,11 @@ async def main():
         print(f"\n工具信息:")
         print(f"  - 工具数量: {agent.tools_count}")
 
+        # 调试：打印权限配置
+        print(f"\n权限配置:")
+        print(f"  - allowed_tools: {agent.options.allowed_tools}")
+        print(f"  - disallowed_tools: {agent.options.disallowed_tools}")
+
         if agent.tool_manager:
             tool_names = agent.tool_manager.get_tool_names()
             print(f"  - 可用工具:")

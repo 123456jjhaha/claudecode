@@ -151,6 +151,15 @@ class InstanceManager:
 
         return self._instance_tools[instance_name]
 
+    def get_tool_names(self) -> list[str]:
+        """
+        获取所有子实例工具的名称
+
+        Returns:
+            工具名称列表（格式：sub_claude_<instance_name>）
+        """
+        return [f"sub_claude_{name}" for name in self._instance_tools.keys()]
+
     @property
     def instances(self) -> dict[str, Callable]:
         """获取所有实例工具定义"""
