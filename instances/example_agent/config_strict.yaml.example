@@ -1,0 +1,74 @@
+# Claude Agent System - 严格工具控制示例
+#
+# 此配置展示如何严格限制 Agent 可用的工具
+
+# ==================== 基础配置 ====================
+agent:
+  name: "example_agent_strict"
+  description: "严格工具控制的示例智能体"
+
+# 模型选择
+model: "claude-sonnet-4-5"
+
+# 系统提示词文件（相对于实例目录）
+system_prompt_file: ".claude/CLAUDE.md"
+
+# 工作目录
+cwd: "."
+
+# ==================== 工具配置 ====================
+tools:
+  # 允许的工具列表
+  # 注意：Claude Code CLI 会自动添加核心工具（Read, Write, Edit, Bash, Glob, Grep 等）
+  # allowed 配置主要用于控制 MCP 工具的访问
+  allowed:
+    - "Read"
+    - "Write"
+    - "Edit"
+    - "Bash"
+    - "Glob"
+    - "Grep"
+    - "mcp__sub_instances__sub_claude_*"
+
+  # 禁止的工具列表
+  # 如果你想严格限制工具访问，可以在这里明确禁止 Claude Code 的核心工具
+  disallowed:
+    # 禁止 Web 工具
+    - "WebFetch"
+    - "WebSearch"
+
+    # 禁止任务管理工具（这会影响 Agent 的任务追踪功能）
+    # - "TodoWrite"
+    # - "TodoRead"
+
+    # 禁止子 Agent 工具（这会阻止使用 Task 工具创建子 Agent）
+    # - "Task"
+
+    # 禁止 Notebook 工具
+    - "NotebookEdit"
+    - "NotebookRead"
+
+    # 禁止 Plan 模式工具（这会阻止进入计划模式）
+    # - "EnterPlanMode"
+    # - "ExitPlanMode"
+
+    # 禁止 Skill 和 SlashCommand 工具
+    # - "Skill"
+    # - "SlashCommand"
+
+    # 禁止 Shell 管理工具
+    - "KillShell"
+    - "BashOutput"
+
+# ==================== 子 Claude 实例配置 ====================
+sub_claude_instances:
+  example_agent2: "example_agent2"
+
+# ==================== 高级配置 ====================
+advanced:
+  permission_mode: "acceptEdits"
+  max_turns: 50
+  setting_sources:
+    - "project"
+  env: {}
+  add_dirs: []
