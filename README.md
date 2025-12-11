@@ -11,6 +11,8 @@
 - 🛠️ **统一工具管理** - 本地工具 + 标准 `.mcp.json` 配置外部 MCP 服务器 + 子实例
 - 📦 **模块化设计** - 清晰的模块划分，易于维护和扩展
 - 🚀 **延迟实例化** - 配置时创建工具定义，调用时才实例化，节省资源
+- 📊 **完整会话记录** - 自动记录所有对话消息，支持层级化存储和查询（新增）
+- 🔍 **强大查询系统** - 通过 ID 查询会话详情、生成调用关系图、统计分析（新增）
 
 ## 核心设计理念
 
@@ -152,6 +154,299 @@ async def main():
 
 asyncio.run(main())
 ```
+
+### 3. 会话记录和查询
+
+```python
+import asyncio
+from src import AgentSystem
+from src.session_query import get_session_details, get_call_graph
+
+async def main():
+    agent = AgentSystem("example_agent")
+    await agent.initialize()
+
+    # 执行查询（自动记录会话）
+    async for message in agent.query("帮我分析这个项目"):
+        pass
+
+    # 获取会话 ID
+    session_id = agent.current_session_id
+    print(f"会话 ID: {session_id}")
+
+    # 查询会话详情
+    details = get_session_details("example_agent", session_id)
+    print(f"状态: {details['metadata']['status']}")
+    print(f"轮次: {details['statistics']['num_turns']}")
+    print(f"成本: ${details['statistics']['cost_usd']:.4f}")
+
+    # 生成调用关系图
+    graph = get_call_graph("example_agent", session_id)
+    print(f"调用层级: {len(graph['graph']['children'])} 个子会话")
+
+asyncio.run(main())
+```
+
+## 会话记录和查询系统
+
+### 📊 功能概述
+
+会话记录系统自动记录每次对话的完整信息，支持：
+- ✅ **自动记录**：父级和子级 Agent 的所有消息自动保存
+- ✅ **层级化存储**：父子会话通过嵌套目录体现调用关系
+- ✅ **异步非阻塞**：后台队列写入，不影响主流程性能
+- ✅ **完整查询 API**：通过会话 ID 查询详情、统计、消息列表
+- ✅ **调用关系图**：可视化整个工作流程的调用树
+- ✅ **自动清理**：配置化的过期会话清理机制
+
+### 📁 会话目录结构
+
+```
+instances/example_agent/sessions/
+└── 20251211T061755_0001_a3f9c2d8/      # 父会话
+    ├── metadata.json                    # 会话元数据
+    ├── messages.jsonl                   # 消息记录（JSON Lines）
+    ├── statistics.json                  # 统计信息
+    ├── call_graph.json                  # 调用关系图
+    └── subsessions/                     # 子会话目录
+        └── 20251211T061800_0001_b4e8d3f9/  # 子会话
+            ├── metadata.json
+            ├── messages.jsonl
+            └── statistics.json
+```
+
+### 🆔 会话 ID 格式
+
+格式：`{timestamp}_{counter}_{short_hash}`
+
+示例：`20251211T061755_0001_a3f9c2d8`
+
+- `timestamp`: ISO 8601 格式时间戳（精确到秒）
+- `counter`: 4位数字编号（同一秒内递增）
+- `short_hash`: 8位随机十六进制字符串
+
+### 📝 数据格式
+
+#### metadata.json（会话元数据）
+```json
+{
+  "session_id": "20251211T061755_0001_a3f9c2d8",
+  "instance_name": "example_agent",
+  "start_time": "2025-12-11T06:17:55.123456",
+  "end_time": "2025-12-11T06:18:45.678901",
+  "status": "completed",
+  "parent_session_id": null,
+  "depth": 0,
+  "initial_prompt": "帮我分析这个项目",
+  "result_summary": "分析完成..."
+}
+```
+
+#### messages.jsonl（消息记录）
+每行一条消息的 JSON：
+```json
+{"seq": 1, "timestamp": "...", "message_type": "UserMessage", "data": {...}}
+{"seq": 2, "timestamp": "...", "message_type": "AssistantMessage", "data": {...}}
+{"seq": 3, "timestamp": "...", "message_type": "ResultMessage", "data": {...}}
+```
+
+#### statistics.json（统计信息）
+```json
+{
+  "total_duration_ms": 50555,
+  "num_turns": 5,
+  "num_tool_calls": 8,
+  "tools_used": {"Glob": 3, "Read": 4},
+  "token_usage": {...},
+  "cost_usd": 0.05
+}
+```
+
+### 🔍 查询 API
+
+#### 1. 获取会话详情
+```python
+from src.session_query import get_session_details
+
+details = get_session_details(
+    instance_name="example_agent",
+    session_id="20251211T061755_0001_a3f9c2d8"
+)
+
+print(details['metadata'])      # 元数据
+print(details['statistics'])    # 统计信息
+print(details['messages'])      # 消息列表
+print(details['subsessions'])   # 子会话列表
+```
+
+#### 2. 列出会话
+```python
+from src.session_query import list_sessions
+
+# 列出所有会话
+sessions = list_sessions("example_agent", limit=100)
+
+# 过滤已完成的会话
+completed = list_sessions("example_agent", status="completed")
+```
+
+#### 3. 搜索会话
+```python
+from src.session_query import search_sessions
+
+# 按提示词搜索
+results = search_sessions(
+    "example_agent",
+    query="代码审查",
+    field="initial_prompt"
+)
+```
+
+#### 4. 生成调用关系图
+```python
+from src.session_query import get_call_graph
+
+graph = get_call_graph("example_agent", session_id)
+
+# 调用关系图结构
+{
+  "root_session_id": "...",
+  "graph": {
+    "session_id": "...",
+    "instance_name": "example_agent",
+    "depth": 0,
+    "children": [
+      {
+        "session_id": "...",
+        "instance_name": "code_reviewer",
+        "depth": 1,
+        "children": [...]
+      }
+    ]
+  }
+}
+```
+
+#### 5. 统计摘要
+```python
+from src.session_query import get_session_statistics_summary
+
+summary = get_session_statistics_summary(
+    "example_agent",
+    session_ids=["session1", "session2"]
+)
+
+print(f"总会话数: {summary['total_sessions']}")
+print(f"总成本: ${summary['total_cost_usd']}")
+print(f"工具使用: {summary['tools_usage']}")
+```
+
+#### 6. 导出会话
+```python
+from src.session_query import export_session
+
+# 导出为 JSON
+data = export_session(
+    "example_agent",
+    session_id,
+    output_format="json",
+    output_file="session.json"
+)
+
+# 导出为 Markdown
+markdown = export_session(
+    "example_agent",
+    session_id,
+    output_format="markdown",
+    output_file="session.md"
+)
+```
+
+#### 7. 清理过期会话
+```python
+from src.session_query import cleanup_sessions
+
+# 模拟运行（不实际删除）
+report = cleanup_sessions(
+    "example_agent",
+    retention_days=30,
+    dry_run=True
+)
+
+# 实际清理
+cleanup_sessions("example_agent", retention_days=30, dry_run=False)
+```
+
+### ⚙️ 配置选项
+
+在 `config.yaml` 中配置会话记录：
+
+```yaml
+# 会话记录配置
+session_recording:
+  enabled: true                    # 是否启用会话记录
+  retention_days: 30               # 保留天数
+  max_total_size_mb: 1000          # 最大总大小（MB）
+  auto_cleanup: true               # 是否自动清理
+
+  # 消息过滤（哪些消息类型要记录）
+  message_types:
+    - "UserMessage"
+    - "AssistantMessage"
+    - "ResultMessage"
+
+  # 性能配置
+  async_write: true                # 异步写入
+  batch_size: 10                   # 批量写入大小
+  batch_timeout: 0.5               # 批量超时（秒）
+```
+
+### 🎯 使用场景
+
+#### 1. 审计和调试
+查看完整的对话历史和工具调用记录：
+```python
+details = get_session_details("agent", session_id)
+
+# 查看所有工具调用
+for msg in details['messages']:
+    if msg['message_type'] == 'AssistantMessage':
+        for block in msg['data']['content']:
+            if block.get('type') == 'tool_use':
+                print(f"工具: {block['name']}, 参数: {block['input']}")
+```
+
+#### 2. 性能分析
+分析 Agent 的性能和成本：
+```python
+summary = get_session_statistics_summary("agent")
+print(f"平均响应时间: {summary['avg_duration_ms']} ms")
+print(f"总成本: ${summary['total_cost_usd']}")
+```
+
+#### 3. 工作流可视化
+生成调用关系图，了解复杂任务的执行流程：
+```python
+graph = get_call_graph("agent", session_id)
+# 可以用于生成可视化图表或导出分析
+```
+
+### 🔄 父子会话关系
+
+**父级 Agent**：
+- 返回所有详细消息（流式）
+- 用户可以实时看到执行进度
+- 通过 `agent.current_session_id` 获取会话 ID
+
+**子级 Agent（子实例）**：
+- 只返回最终结果给父级
+- 完整过程记录到文件
+- 在响应的 `_session_metadata` 字段包含会话 ID
+
+**自动关联**：
+- 使用 `contextvars` 实现父子会话自动关联
+- 子会话嵌套在父会话的 `subsessions/` 目录下
+- 无需手动管理会话关系
 
 ## 系统架构
 

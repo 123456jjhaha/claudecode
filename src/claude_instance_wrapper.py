@@ -128,13 +128,22 @@ def create_claude_instance_tool(
             # 构建提示词
             prompt = _build_prompt(task, context_files, variables, output_format)
 
-            # 执行查询
-            result_text = await sub_agent.query_text(prompt)
+            # 执行查询（record_session=True，记录子会话）
+            result_text = await sub_agent.query_text(prompt, record_session=True)
 
             # 格式化返回结果
-            # 注意：这里我们无法获取详细的元数据（如 turns, tools_used）
-            # 因为 query_text() 只返回文本
-            return _format_result(result_text, output_format)
+            response = _format_result(result_text, output_format)
+
+            # 重要：添加会话 ID 到响应（用于父级查询）
+            if sub_agent.current_session_id:
+                # 使用特殊字段记录子会话 ID
+                response["_session_metadata"] = {
+                    "session_id": sub_agent.current_session_id,
+                    "instance_name": instance_name
+                }
+                logger.info(f"子实例会话 ID: {sub_agent.current_session_id}")
+
+            return response
 
         except Exception as e:
             logger.error(f"子实例执行失败: {e}", exc_info=True)

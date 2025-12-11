@@ -4,9 +4,8 @@ Agent 系统主类
 整合所有组件，提供统一的接口
 """
 
-import os
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Optional
 from functools import wraps
 from claude_agent_sdk import query, ClaudeAgentOptions
 
@@ -70,6 +69,10 @@ class AgentSystem:
         self.config_loader: AgentConfigLoader | None = None
         self.tool_manager: ToolManager | None = None
         self.instance_manager: InstanceManager | None = None
+
+        # 会话管理（新增）
+        self.session_manager: Any | None = None  # SessionManager
+        self._current_session: Any | None = None  # Session
 
         # 配置和选项
         self._config: dict | None = None
@@ -162,6 +165,17 @@ class AgentSystem:
 
             self._options = ClaudeAgentOptions(**options_dict)
 
+            # 7. 初始化会话管理器
+            logger.info("初始化会话管理器...")
+            from .session_manager import SessionManager
+            from .session_context import get_current_session
+
+            parent_session = get_current_session()
+            self.session_manager = SessionManager(
+                instance_path=self.instance_path,
+                parent_session=parent_session
+            )
+
             self._initialized = True
             logger.info("系统初始化完成")
 
@@ -185,8 +199,6 @@ class AgentSystem:
         Returns:
             所有 MCP 工具名称列表
         """
-        from fnmatch import fnmatch
-
         all_tool_names = []
 
         # 1. 收集本地自定义工具
@@ -262,12 +274,13 @@ class AgentSystem:
             options_dict["disallowed_tools"] = expanded_disallowed
             logger.info(f"展开后的 disallowed_tools 包含 {len(expanded_disallowed)} 个工具")
 
-    async def query(self, prompt: str) -> AsyncIterator[Any]:
+    async def query(self, prompt: str, record_session: bool = True) -> AsyncIterator[Any]:
         """
-        执行查询
+        执行查询（支持会话记录）
 
         Args:
             prompt: 查询提示词
+            record_session: 是否记录会话到文件
 
         Yields:
             查询响应消息
@@ -278,8 +291,20 @@ class AgentSystem:
         if not self._initialized:
             await self.initialize()
 
-        logger.info(f"执行查询...")
+        logger.info(f"执行查询... (record_session={record_session})")
         logger.debug(f"提示词: {prompt}")
+
+        # 创建会话（如果需要记录）
+        session = None
+        if record_session and self.session_manager:
+            from .session_context import set_current_session
+
+            session = await self.session_manager.create_session(
+                initial_prompt=prompt,
+                context=None
+            )
+            self._current_session = session
+            set_current_session(session)  # 设置上下文
 
         try:
             # 修复：使用异步生成器提示词而不是字符串提示词
@@ -288,18 +313,40 @@ class AgentSystem:
             async def prompt_generator():
                 yield {"type": "user", "message": {"role": "user", "content": prompt}}
 
+            # 执行查询并记录消息
             async for message in query(prompt=prompt_generator(), options=self._options):
+                # 记录消息（异步非阻塞）
+                if session:
+                    await session.record_message(message)
+
+                # 返回消息（流式）
                 yield message
 
+                # 检查是否是 ResultMessage（会话结束）
+                if hasattr(message, 'subtype'):  # ResultMessage
+                    if session:
+                        await session.finalize(result_message=message)
+
         except Exception as e:
+            # 记录错误
+            if session:
+                session.metadata['status'] = 'failed'
+                session.metadata['error'] = str(e)
+                await session.finalize()
             raise AgentSystemError(f"查询失败: {e}")
 
-    async def query_text(self, prompt: str) -> str:
+        finally:
+            from .session_context import set_current_session
+            set_current_session(None)  # 清理上下文
+            self._current_session = None
+
+    async def query_text(self, prompt: str, record_session: bool = True) -> str:
         """
-        执行查询并返回文本响应
+        执行查询并返回文本响应（支持会话记录）
 
         Args:
             prompt: 查询提示词
+            record_session: 是否记录会话
 
         Returns:
             文本响应
@@ -309,9 +356,22 @@ class AgentSystem:
         """
         result_text = ""
 
-        async for message in self.query(prompt):
-            if hasattr(message, "text"):
-                result_text += message.text
+        async for message in self.query(prompt, record_session=record_session):
+            # 修复：正确提取文本
+            # AssistantMessage 包含 content 列表，需要遍历 TextBlock
+            message_type = type(message).__name__
+
+            if message_type == "AssistantMessage":
+                from claude_agent_sdk import TextBlock
+
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        result_text += block.text
+
+            elif message_type == "ResultMessage":
+                # ResultMessage 可能包含最终结果
+                if hasattr(message, 'result') and message.result:
+                    result_text += message.result
 
         return result_text
 
@@ -352,6 +412,13 @@ class AgentSystem:
         if self.instance_manager is None:
             return 0
         return self.instance_manager.instance_count
+
+    @property
+    def current_session_id(self) -> Optional[str]:
+        """获取当前会话 ID"""
+        if self._current_session:
+            return self._current_session.session_id
+        return None
 
     def __repr__(self) -> str:
         """字符串表示"""
