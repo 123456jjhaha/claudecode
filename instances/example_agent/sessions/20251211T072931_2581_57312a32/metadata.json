@@ -1,0 +1,14 @@
+{
+  "session_id": "20251211T072931_2581_57312a32",
+  "instance_name": "example_agent",
+  "start_time": "2025-12-11T07:29:31.372616",
+  "end_time": "2025-12-11T07:29:35.725241",
+  "status": "completed",
+  "parent_session_id": null,
+  "parent_instance_name": null,
+  "depth": 0,
+  "initial_prompt": "你好！请详细解释一下机器学习的基本概念，包括监督学习、无监督学习和强化学习的主要区别。",
+  "result_summary": null,
+  "error": null,
+  "context": {}
+}

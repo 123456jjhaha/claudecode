@@ -1,0 +1,17 @@
+{
+  "session_id": "20251211T073258_9490_fd3a0ff0",
+  "total_duration_ms": 15000,
+  "api_duration_ms": 0,
+  "num_turns": 3,
+  "num_messages": 10,
+  "num_tool_calls": 0,
+  "tools_used": {},
+  "subsessions": [],
+  "token_usage": {
+    "input_tokens": 850,
+    "output_tokens": 1200
+  },
+  "cost_usd": 0.08,
+  "final_status": "completed",
+  "error_count": 0
+}

@@ -336,6 +336,13 @@ class AgentSystem:
             raise AgentSystemError(f"查询失败: {e}")
 
         finally:
+            # 确保会话被正确处理
+            if session and session.metadata.get('status') == 'running':
+                # 会话未正常结束，标记为中断
+                session.metadata['status'] = 'interrupted'
+                session.metadata['error'] = 'Connection was interrupted'
+                await session.finalize()
+
             from .session_context import set_current_session
             set_current_session(None)  # 清理上下文
             self._current_session = None

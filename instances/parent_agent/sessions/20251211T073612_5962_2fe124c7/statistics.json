@@ -1,0 +1,33 @@
+{
+  "session_id": "20251211T073612_5962_2fe124c7",
+  "total_duration_ms": 25000,
+  "api_duration_ms": 0,
+  "num_turns": 5,
+  "num_messages": 5,
+  "num_tool_calls": 0,
+  "tools_used": {},
+  "subsessions": [
+    {
+      "session_id": "20251211T073612_0150_cddc4fe5",
+      "instance_name": "data_analyst",
+      "status": "running"
+    },
+    {
+      "session_id": "20251211T073612_3756_6acd6395",
+      "instance_name": "visualization_expert",
+      "status": "running"
+    },
+    {
+      "session_id": "20251211T073613_7197_719b0bcd",
+      "instance_name": "business_strategist",
+      "status": "running"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 850,
+    "output_tokens": 1200
+  },
+  "cost_usd": 0.15,
+  "final_status": "completed",
+  "error_count": 0
+}

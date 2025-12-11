@@ -1,0 +1,18 @@
+{
+  "session_id": "20251211T073612_3756_6acd6395",
+  "instance_name": "visualization_expert",
+  "start_time": "2025-12-11T07:36:12.943833",
+  "end_time": null,
+  "status": "running",
+  "parent_session_id": "20251211T073612_5962_2fe124c7",
+  "parent_instance_name": "parent_agent",
+  "depth": 1,
+  "initial_prompt": "生成数据可视化图表",
+  "result_summary": null,
+  "error": null,
+  "context": {
+    "parent_session_id": "20251211T073612_5962_2fe124c7",
+    "parent_task": "销售数据分析",
+    "specialization": "visualization_expert"
+  }
+}

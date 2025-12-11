@@ -1,0 +1,14 @@
+{
+  "session_id": "20251211T073053_6672_60d16d8f",
+  "instance_name": "example_agent",
+  "start_time": "2025-12-11T07:30:53.806765",
+  "end_time": "2025-12-11T07:30:55.784162",
+  "status": "completed",
+  "parent_session_id": null,
+  "parent_instance_name": null,
+  "depth": 0,
+  "initial_prompt": "基于我们刚才的讨论，请总结一下机器学习的核心要点，并给出学习建议。",
+  "result_summary": null,
+  "error": null,
+  "context": {}
+}

@@ -1,0 +1,49 @@
+{
+  "root_session_id": "20251211T073612_5962_2fe124c7",
+  "generated_at": "2025-12-11T07:36:13.454892",
+  "graph": {
+    "session_id": "20251211T073612_5962_2fe124c7",
+    "instance_name": "parent_agent",
+    "depth": 0,
+    "start_time": "2025-12-11T07:36:12.636001",
+    "end_time": "2025-12-11T07:36:13.453066",
+    "duration_ms": 0,
+    "status": "completed",
+    "num_turns": 0,
+    "children": [
+      {
+        "session_id": "20251211T073612_0150_cddc4fe5",
+        "instance_name": "data_analyst",
+        "depth": 1,
+        "start_time": "2025-12-11T07:36:12.740196",
+        "end_time": null,
+        "duration_ms": 0,
+        "status": "running",
+        "num_turns": 0,
+        "children": []
+      },
+      {
+        "session_id": "20251211T073613_7197_719b0bcd",
+        "instance_name": "business_strategist",
+        "depth": 1,
+        "start_time": "2025-12-11T07:36:13.147323",
+        "end_time": null,
+        "duration_ms": 0,
+        "status": "running",
+        "num_turns": 0,
+        "children": []
+      },
+      {
+        "session_id": "20251211T073612_3756_6acd6395",
+        "instance_name": "visualization_expert",
+        "depth": 1,
+        "start_time": "2025-12-11T07:36:12.943833",
+        "end_time": null,
+        "duration_ms": 0,
+        "status": "running",
+        "num_turns": 0,
+        "children": []
+      }
+    ]
+  }
+}
