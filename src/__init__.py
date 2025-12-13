@@ -7,7 +7,7 @@ Claude Agent System
 __version__ = "1.0.0"
 
 # 导出主类
-from .agent_system import AgentSystem
+from .agent_system import AgentSystem, QueryResult, QueryStream
 
 # 导出核心组件
 from .config_loader import AgentConfigLoader
@@ -38,6 +38,8 @@ __all__ = [
     "__version__",
     # 主类
     "AgentSystem",
+    "QueryResult",
+    "QueryStream",
     # 核心组件
     "AgentConfigLoader",
     "ToolManager",

@@ -102,6 +102,9 @@ class Session:
         self._statistics = Statistics()
         self._finalized = False
 
+        # 消息计数器（用于 seq 序列号，支持 resume 模式）
+        self._message_count = self._load_existing_message_count()
+
     async def start(self) -> None:
         """启动会话（创建目录和初始元数据）"""
         # 创建会话目录
@@ -127,12 +130,13 @@ class Session:
         if message_types and message_type not in message_types:
             return  # 跳过不需要记录的消息类型
 
-        # 只追加到内存列表
+        # 只追加到内存列表（使用全局计数器确保 seq 连续）
         self._messages.append({
-            "seq": len(self._messages),
+            "seq": self._message_count,
             "timestamp": datetime.now().isoformat(),
             "message": message
         })
+        self._message_count += 1
 
         # 更新统计信息
         self._statistics.num_messages += 1
@@ -183,7 +187,11 @@ class Session:
         # 一次性写入所有消息到 messages.jsonl
         if self._messages:
             messages_file = self.session_dir / "messages.jsonl"
-            with open(messages_file, 'w', encoding='utf-8') as f:
+
+            # 如果文件存在，说明是 resume 模式，使用追加模式
+            mode = 'a' if messages_file.exists() else 'w'
+
+            with open(messages_file, mode, encoding='utf-8') as f:
                 for msg_data in self._messages:
                     try:
                         message_dict = self._serialize_message(msg_data['message'])
@@ -385,6 +393,30 @@ class Session:
         """获取统计信息"""
         return asdict(self._statistics)
 
+    def _load_existing_message_count(self) -> int:
+        """
+        加载已存在的消息数量（用于 resume 模式）
+
+        Returns:
+            已写入的消息数量
+        """
+        messages_file = self.session_dir / "messages.jsonl"
+
+        if not messages_file.exists():
+            return 0
+
+        # 统计已有消息数量
+        count = 0
+        try:
+            with open(messages_file, 'r', encoding='utf-8') as f:
+                for _ in f:
+                    count += 1
+        except Exception as e:
+            logger.warning(f"读取已有消息数量失败: {e}")
+            return 0
+
+        return count
+
     def get_subsessions(self) -> List['Session']:
         """获取所有子会话"""
         subsessions_dir = self.session_dir / "subsessions"
@@ -401,7 +433,7 @@ class Session:
             if not metadata_file.exists():
                 continue
 
-            with open(metadata_file, 'r') as f:
+            with open(metadata_file, 'r', encoding='utf-8') as f:
                 metadata = json.load(f)
 
             subsessions.append(Session(
@@ -526,7 +558,7 @@ class SessionManager:
 
     def get_session(self, session_id: str) -> Session:
         """
-        获取已存在的会话对象
+        获取已存在的会话对象（用于 resume）
 
         Args:
             session_id: 会话 ID
@@ -546,14 +578,15 @@ class SessionManager:
         if not metadata_file.exists():
             raise AgentSystemError(f"会话元数据文件不存在: {session_id}")
 
-        with open(metadata_file, 'r') as f:
+        with open(metadata_file, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
 
         return Session(
             session_id=session_id,
             session_dir=session_dir,
             metadata=metadata,
-            parent_session=None
+            parent_session=None,
+            config=self.config  # 传递配置，确保消息过滤等配置生效
         )
 
     def list_sessions(
@@ -586,7 +619,7 @@ class SessionManager:
             if not metadata_file.exists():
                 continue
 
-            with open(metadata_file, 'r') as f:
+            with open(metadata_file, 'r', encoding='utf-8') as f:
                 metadata = json.load(f)
 
             # 过滤状态
@@ -634,7 +667,7 @@ class SessionManager:
             if not metadata_file.exists():
                 continue
 
-            with open(metadata_file, 'r') as f:
+            with open(metadata_file, 'r', encoding='utf-8') as f:
                 metadata = json.load(f)
 
             # 检查是否过期

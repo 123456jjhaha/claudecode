@@ -66,6 +66,10 @@ def create_claude_instance_tool(
                 "description": "输出格式：text（默认）、json、markdown",
                 "enum": ["text", "json", "markdown"]
             },
+            "resume_session_id": {
+                "type": "string",
+                "description": "要恢复的会话 ID（可选，用于继续之前的对话）"
+            },
             "max_turns": {
                 "type": "integer",
                 "description": "最大对话轮次（可选）"
@@ -95,6 +99,7 @@ def create_claude_instance_tool(
         task = args.get("task")
         context_files = args.get("context_files", [])
         output_format = args.get("output_format", "text")
+        resume_session_id = args.get("resume_session_id")
         max_turns = args.get("max_turns")
         variables = args.get("variables", {})
         cwd = args.get("cwd")
@@ -128,20 +133,26 @@ def create_claude_instance_tool(
             # 构建提示词
             prompt = _build_prompt(task, context_files, variables, output_format)
 
-            # 执行查询（record_session=True，记录子会话）
-            result_text = await sub_agent.query_text(prompt, record_session=True)
+            # 执行查询（支持 resume）
+            query_result = await sub_agent.query_text(
+                prompt,
+                record_session=True,
+                resume_session_id=resume_session_id
+            )
 
             # 格式化返回结果
-            response = _format_result(result_text, output_format)
+            response = _format_result(query_result.result, output_format)
 
             # 重要：添加会话 ID 到响应（用于父级查询）
-            if sub_agent.current_session_id:
+            if query_result.session_id:
                 # 使用特殊字段记录子会话 ID
                 response["_session_metadata"] = {
-                    "session_id": sub_agent.current_session_id,
-                    "instance_name": instance_name
+                    "session_id": query_result.session_id,
+                    "instance_name": instance_name,
+                    "resumed": resume_session_id is not None  # 标记是否是 resume 模式
                 }
-                logger.info(f"子实例会话 ID: {sub_agent.current_session_id}")
+                logger.info(f"子实例会话 ID: {query_result.session_id}" +
+                          (f" (resumed from {resume_session_id})" if resume_session_id else ""))
 
             return response
 

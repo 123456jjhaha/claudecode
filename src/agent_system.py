@@ -7,7 +7,9 @@ Agent 系统主类
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 from functools import wraps
-from claude_agent_sdk import query, ClaudeAgentOptions
+from datetime import datetime
+from dataclasses import dataclass
+from claude_agent_sdk import query, ClaudeAgentOptions, SystemMessage
 
 from .config_loader import AgentConfigLoader
 from .tool_manager import ToolManager
@@ -17,6 +19,37 @@ from .error_handling import AgentSystemError
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class QueryResult:
+    """
+    查询结果对象
+
+    Attributes:
+        result: 查询结果文本
+        session_id: 会话 ID（如果启用了会话记录）
+    """
+    result: str
+    session_id: Optional[str] = None
+
+
+class QueryStream:
+    """
+    查询流对象
+
+    封装异步迭代器和 session_id，支持流式访问消息
+    """
+
+    def __init__(self, iterator: AsyncIterator[Any], session_id: Optional[str] = None):
+        self._iterator = iterator
+        self.session_id = session_id
+
+    def __aiter__(self):
+        return self._iterator.__aiter__()
+
+    async def __anext__(self):
+        return await self._iterator.__anext__()
 
 
 def require_initialized(func):
@@ -72,7 +105,6 @@ class AgentSystem:
 
         # 会话管理（新增）
         self.session_manager: Any | None = None  # SessionManager
-        self._current_session: Any | None = None  # Session
 
         # 配置和选项
         self._config: dict | None = None
@@ -279,16 +311,22 @@ class AgentSystem:
             options_dict["disallowed_tools"] = expanded_disallowed
             logger.info(f"展开后的 disallowed_tools 包含 {len(expanded_disallowed)} 个工具")
 
-    async def query(self, prompt: str, record_session: bool = True) -> AsyncIterator[Any]:
+    async def query(
+        self,
+        prompt: str,
+        record_session: bool = True,
+        resume_session_id: Optional[str] = None
+    ) -> QueryStream:
         """
-        执行查询（支持会话记录）
+        执行查询（支持会话记录和 resume）
 
         Args:
             prompt: 查询提示词
             record_session: 是否记录会话到文件
+            resume_session_id: 要恢复的会话 ID（我们的本地 session_id）
 
-        Yields:
-            查询响应消息
+        Returns:
+            QueryStream 对象（可迭代，包含 session_id 属性）
 
         Raises:
             AgentSystemError: 查询失败
@@ -296,67 +334,127 @@ class AgentSystem:
         if not self._initialized:
             await self.initialize()
 
-        logger.info(f"执行查询... (record_session={record_session})")
+        logger.info(f"执行查询... (record_session={record_session}, resume={resume_session_id})")
         logger.debug(f"提示词: {prompt}")
 
-        # 创建会话（如果需要记录）
+        # 创建或加载 session
         session = None
-        if record_session and self.session_manager:
+
+        if resume_session_id:
+            # === Resume 模式 ===
+            from .session_context import set_current_session
+
+            # 1. 加载之前的会话
+            session = self.session_manager.get_session(resume_session_id)
+            logger.info(f"恢复会话: {resume_session_id}")
+            session_id = resume_session_id
+
+            # 2. 获取 Claude SDK 的 session_id
+            claude_session_id = session.metadata.get('claude_session_id')
+            if not claude_session_id:
+                raise AgentSystemError(f"会话 {resume_session_id} 没有 Claude session_id，无法 resume")
+
+            # 3. 基于当前 options 添加 resume 参数（无需重新读取配置）
+            logger.info(f"使用 Claude session_id: {claude_session_id}")
+
+            # 将当前 options 转换为 dict，添加 resume 字段
+            options_dict = self._options.__dict__.copy()
+            options_dict['resume'] = claude_session_id
+
+            # 重新生成 options（包含 resume 参数）
+            query_options = ClaudeAgentOptions(**options_dict)
+
+            # 4. 重置会话状态（准备追加）
+            session.metadata['status'] = 'running'
+            session.metadata['resumed_at'] = datetime.now().isoformat()
+            session._finalized = False
+
+            set_current_session(session)
+
+        elif record_session and self.session_manager:
+            # === 新会话模式 ===
             from .session_context import set_current_session
 
             session = await self.session_manager.create_session(
                 initial_prompt=prompt,
                 context=None
             )
-            self._current_session = session
+            session_id = session.session_id
+            query_options = self._options
             set_current_session(session)  # 设置上下文
 
-        try:
-            # 修复：使用异步生成器提示词而不是字符串提示词
-            # 这是为了解决 Claude Agent SDK 的一个已知 bug (Issue #266, #386)
-            # 当使用 SDK MCP 服务器时，字符串提示词会导致 ProcessTransport 错误
-            async def prompt_generator():
-                yield {"type": "user", "message": {"role": "user", "content": prompt}}
+        else:
+            # 不记录会话
+            session_id = None
+            query_options = self._options
 
-            # 执行查询并记录消息
-            async for message in query(prompt=prompt_generator(), options=self._options):
-                # 记录消息（异步非阻塞）
-                if session:
-                    await session.record_message(message)
+        # 创建内部异步生成器
+        async def _query_generator():
+            try:
+                # 修复：使用异步生成器提示词而不是字符串提示词
+                # 这是为了解决 Claude Agent SDK 的一个已知 bug (Issue #266, #386)
+                # 当使用 SDK MCP 服务器时，字符串提示词会导致 ProcessTransport 错误
+                async def prompt_generator():
+                    yield {"type": "user", "message": {"role": "user", "content": prompt}}
 
-                # 返回消息（流式）
+                # 执行查询并记录消息
+                async for message in query(prompt=prompt_generator(), options=query_options):
+                    # 在第一条 SystemMessage 中获取 Claude session_id
+                    if isinstance(message, SystemMessage) and message.subtype == 'init':
+                        if session and 'claude_session_id' not in session.metadata:
+                            claude_session_id = message.data.get('session_id')
+                            if claude_session_id:
+                                session.metadata['claude_session_id'] = claude_session_id
+                                logger.info(f"获取 Claude session_id: {claude_session_id}")
+                                # 立即保存元数据
+                                import json
+                                metadata_file = session.session_dir / "metadata.json"
+                                with open(metadata_file, 'w', encoding='utf-8') as f:
+                                    json.dump(session.metadata, f, indent=2, ensure_ascii=False)
 
-                yield message
-                # 检查是否是 ResultMessage（会话结束）
-                message_type = type(message).__name__
-
-                if message_type == "ResultMessage":
+                    # 记录消息到内存
                     if session:
-                        await session.finalize(result_message=message)
+                        await session.record_message(message)
 
-        except Exception as e:
-            # 记录错误
-            if session:
-                session.metadata['status'] = 'failed'
-                session.metadata['error'] = str(e)
-                await session.finalize()
-            raise AgentSystemError(f"查询失败: {e}")
+                    # 返回消息（流式）
+                    yield message
 
-        finally:
-            # 确保会话被正确处理
-            if session and session.metadata.get('status') == 'running':
-                # 会话未正常结束，标记为中断
-                session.metadata['status'] = 'interrupted'
-                session.metadata['error'] = 'Connection was interrupted'
-                await session.finalize()
+                    # 检查是否是 ResultMessage（会话结束）
+                    message_type = type(message).__name__
+                    if message_type == "ResultMessage":
+                        if session:
+                            await session.finalize(result_message=message)
 
-            from .session_context import set_current_session
-            set_current_session(None)  # 清理上下文
-            self._current_session = None
+            except Exception as e:
+                # 记录错误
+                if session:
+                    session.metadata['status'] = 'failed'
+                    session.metadata['error'] = str(e)
+                    await session.finalize()
+                raise AgentSystemError(f"查询失败: {e}")
 
-    async def query_text(self, prompt: str, record_session: bool = True) -> str:
+            finally:
+                # 确保会话被正确处理
+                if session and session.metadata.get('status') == 'running':
+                    # 会话未正常结束，标记为中断
+                    session.metadata['status'] = 'interrupted'
+                    session.metadata['error'] = 'Connection was interrupted'
+                    await session.finalize()
+
+                from .session_context import set_current_session
+                set_current_session(None)  # 清理上下文
+
+        # 返回 QueryStream 对象
+        return QueryStream(_query_generator(), session_id)
+
+    async def query_text(
+        self,
+        prompt: str,
+        record_session: bool = True,
+        resume_session_id: Optional[str] = None
+    ) -> QueryResult:
         """
-        执行查询并返回最终文本结果（支持会话记录）
+        执行查询并返回最终文本结果（支持会话记录和 resume）
 
         只返回 ResultMessage 中的 result 文本，不返回过程中的 AssistantMessage 文本。
         适用于子实例调用，只需要最终结果而不需要查看执行过程。
@@ -364,16 +462,23 @@ class AgentSystem:
         Args:
             prompt: 查询提示词
             record_session: 是否记录会话
+            resume_session_id: 要恢复的会话 ID（我们的本地 session_id）
 
         Returns:
-            ResultMessage 中的 result 文本，如果没有则返回空字符串
+            QueryResult 对象（包含 result 和 session_id）
 
         Raises:
             AgentSystemError: 查询失败
         """
         result_text = ""
 
-        async for message in self.query(prompt, record_session=record_session):
+        stream = await self.query(
+            prompt,
+            record_session=record_session,
+            resume_session_id=resume_session_id
+        )
+
+        async for message in stream:
             # 只获取 ResultMessage 的 result
             message_type = type(message).__name__
 
@@ -381,7 +486,7 @@ class AgentSystem:
                 if hasattr(message, 'result') and message.result:
                    result_text = message.result
 
-        return result_text
+        return QueryResult(result=result_text, session_id=stream.session_id)
 
     @property
     @require_initialized
@@ -420,13 +525,6 @@ class AgentSystem:
         if self.instance_manager is None:
             return 0
         return self.instance_manager.instance_count
-
-    @property
-    def current_session_id(self) -> Optional[str]:
-        """获取当前会话 ID"""
-        if self._current_session:
-            return self._current_session.session_id
-        return None
 
     def __repr__(self) -> str:
         """字符串表示"""

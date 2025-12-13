@@ -1,19 +1,17 @@
 {
-  "session_id": "20251212T234623_3154_17ebbf04",
-  "total_duration_ms": 12064,
-  "api_duration_ms": 17098,
-  "num_turns": 3,
-  "num_messages": 8,
-  "num_tool_calls": 2,
-  "tools_used": {
-    "Read": 2
-  },
+  "session_id": "20251213T024157_8391_2fdbb531",
+  "total_duration_ms": 4745,
+  "api_duration_ms": 4698,
+  "num_turns": 1,
+  "num_messages": 3,
+  "num_tool_calls": 0,
+  "tools_used": {},
   "subsessions": [],
   "token_usage": {
-    "input_tokens": 22546,
+    "input_tokens": 143,
     "cache_creation_input_tokens": 0,
-    "cache_read_input_tokens": 19072,
-    "output_tokens": 726,
+    "cache_read_input_tokens": 21248,
+    "output_tokens": 14,
     "server_tool_use": {
       "web_search_requests": 0,
       "web_fetch_requests": 0
@@ -24,7 +22,7 @@
       "ephemeral_5m_input_tokens": 0
     }
   },
-  "cost_usd": 0.099734,
+  "cost_usd": 0.0070133999999999995,
   "final_status": "completed",
   "error_count": 0
 }
