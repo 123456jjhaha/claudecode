@@ -1,0 +1,24 @@
+{
+  "session_id": "20251213T095354_6622_88002039",
+  "total_duration_ms": 0,
+  "api_duration_ms": 0,
+  "num_turns": 0,
+  "num_messages": 21,
+  "num_tool_calls": 8,
+  "tools_used": {
+    "TodoWrite": 2,
+    "Bash": 3,
+    "Read": 2,
+    "mcp__sub_instances__sub_claude_file_analyzer": 1
+  },
+  "subsessions": [
+    {
+      "session_id": "20251213T095416_7609_a435e6f2",
+      "instance_name": "file_analyzer_agent"
+    }
+  ],
+  "token_usage": null,
+  "cost_usd": null,
+  "final_status": "running",
+  "error_count": 0
+}

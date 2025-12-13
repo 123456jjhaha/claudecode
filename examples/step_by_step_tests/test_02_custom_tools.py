@@ -30,7 +30,7 @@ async def test_custom_tools():
     try:
         # 创建并初始化 agent
         print("\n1. 初始化 Demo Agent...")
-        agent = AgentSystem("demo_agent")
+        agent = AgentSystem("demo_agent",instances_root="C:/Users/Lenovo/Desktop/test2/claudecode/instances")
         await agent.initialize()
 
         # 测试 1: 计算器工具

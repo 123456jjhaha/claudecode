@@ -153,7 +153,7 @@ def list_sessions(
 def search_sessions(
     instance_name: str,
     query: str,
-    field: str = "initial_prompt",
+    field: str = "prompts",
     instances_root: Optional[Path] = None
 ) -> List[Dict[str, Any]]:
     """
@@ -162,7 +162,7 @@ def search_sessions(
     Args:
         instance_name: 实例名称
         query: 搜索关键词
-        field: 搜索字段（"initial_prompt", "result_summary", "error"）
+        field: 搜索字段（"prompts", "results", "error"）
         instances_root: 实例根目录
 
     Returns:
@@ -175,8 +175,27 @@ def search_sessions(
 
     matched_sessions = []
     for session in all_sessions:
-        field_value = session.get(field)
-        if field_value and query.lower() in str(field_value).lower():
+        # 处理新的数组格式
+        if field == "prompts":
+            field_value = session.get("prompts", [])
+            # 在所有提示词中搜索
+            found = any(
+                query.lower() in prompt_item.get("prompt", "").lower()
+                for prompt_item in field_value
+            )
+        elif field == "results":
+            field_value = session.get("results", [])
+            # 在所有结果中搜索
+            found = any(
+                query.lower() in result_item.get("result", "").lower()
+                for result_item in field_value
+            )
+        else:
+            # 其他字段（如 error）
+            field_value = session.get(field)
+            found = field_value and query.lower() in str(field_value).lower()
+
+        if found:
             matched_sessions.append(session)
 
     return matched_sessions
@@ -366,15 +385,29 @@ def export_session(
         lines.append(f"- **嵌套深度**: {metadata['depth']}")
         lines.append("")
 
-        # 提示词
-        lines.append("## 初始提示词")
-        lines.append(f"```\n{metadata['initial_prompt']}\n```")
-        lines.append("")
+        # 提示词历史
+        lines.append("## 提示词历史")
+        for i, prompt_item in enumerate(metadata.get('prompts', []), 1):
+            lines.append(f"### 提示词 {i}")
+            lines.append(f"**时间**: {prompt_item.get('timestamp', 'N/A')}")
+            lines.append(f"```\n{prompt_item.get('prompt', 'N/A')}\n```")
+            lines.append("")
 
-        # 结果摘要
-        if metadata.get('result_summary'):
-            lines.append("## 结果摘要")
-            lines.append(metadata['result_summary'])
+        if not metadata.get('prompts'):
+            lines.append("无提示词记录")
+            lines.append("")
+
+        # 结果历史
+        lines.append("## 结果历史")
+        for i, result_item in enumerate(metadata.get('results', []), 1):
+            lines.append(f"### 结果 {i}")
+            lines.append(f"**时间**: {result_item.get('timestamp', 'N/A')}")
+            lines.append(f"**状态**: {'❌ 错误' if result_item.get('is_error', False) else '✅ 成功'}")
+            lines.append(f"```\n{result_item.get('result', 'N/A')}\n```")
+            lines.append("")
+
+        if not metadata.get('results'):
+            lines.append("无结果记录")
             lines.append("")
 
         # 统计信息

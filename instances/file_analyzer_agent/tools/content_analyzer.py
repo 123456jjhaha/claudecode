@@ -29,7 +29,7 @@ from collections import Counter, defaultdict
             "include_statistics": {
                 "type": "boolean",
                 "description": "是否包含统计分析",
-                "default": true
+                "default": True
             },
             "max_sample_size": {
                 "type": "integer",

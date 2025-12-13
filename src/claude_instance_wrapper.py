@@ -102,6 +102,17 @@ def create_claude_instance_tool(
         resume_session_id = args.get("resume_session_id")
         max_turns = args.get("max_turns")
         variables = args.get("variables", {})
+        # 确保 variables 是字典类型
+        if isinstance(variables, str):
+            # 如果传入的是字符串，尝试解析为 JSON
+            try:
+                import json
+                variables = json.loads(variables)
+            except (json.JSONDecodeError, TypeError):
+                # 如果解析失败，创建一个简单的字典
+                variables = {"value": variables}
+        elif variables is None:
+            variables = {}
         cwd = args.get("cwd")
 
         if not task:
@@ -140,21 +151,25 @@ def create_claude_instance_tool(
                 resume_session_id=resume_session_id
             )
 
-            # 格式化返回结果
-            response = _format_result(query_result.result, output_format)
+            # 构建标准 MCP 工具返回格式
+            result = {
+                "content": [{
+                    "type": "text",
+                    "text": query_result.result
+                }]
+            }
 
-            # 重要：添加会话 ID 到响应（用于父级查询）
+            # 添加会话 ID 到响应（用于父级查询）
             if query_result.session_id:
-                # 使用特殊字段记录子会话 ID
-                response["_session_metadata"] = {
+                result["_session_metadata"] = {
                     "session_id": query_result.session_id,
                     "instance_name": instance_name,
-                    "resumed": resume_session_id is not None  # 标记是否是 resume 模式
+                    "resumed": bool(resume_session_id)
                 }
                 logger.info(f"子实例会话 ID: {query_result.session_id}" +
                           (f" (resumed from {resume_session_id})" if resume_session_id else ""))
 
-            return response
+            return result
 
         except Exception as e:
             logger.error(f"子实例执行失败: {e}", exc_info=True)
@@ -213,32 +228,3 @@ def _build_prompt(
     return "\n\n".join(sections)
 
 
-def _format_result(
-    result_text: str,
-    output_format: str
-) -> dict[str, Any]:
-    """
-    格式化返回结果
-
-    Args:
-        result_text: 结果文本
-        output_format: 输出格式
-
-    Returns:
-        格式化后的结果字典（MCP 工具响应格式）
-    """
-    # 尝试美化 JSON 输出
-    if output_format == "json":
-        try:
-            result_json = json.loads(result_text)
-            result_text = json.dumps(result_json, ensure_ascii=False, indent=2)
-        except json.JSONDecodeError:
-            logger.warning("无法解析为 JSON，返回原文本")
-
-    # 返回标准 MCP 工具响应格式
-    return {
-        "content": [{
-            "type": "text",
-            "text": result_text
-        }]
-    }

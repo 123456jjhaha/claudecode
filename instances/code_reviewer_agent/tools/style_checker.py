@@ -19,7 +19,7 @@ import ast
             "strict_mode": {
                 "type": "boolean",
                 "description": "是否启用严格模式检查",
-                "default": false
+                "default": False
             }
         },
         "required": ["file_path"]

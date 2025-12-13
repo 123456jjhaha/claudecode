@@ -67,12 +67,12 @@ FILE_SIGNATURES = {
             "deep_scan": {
                 "type": "boolean",
                 "description": "是否进行深度扫描（读取更多字节进行检测）",
-                "default": false
+                "default": False
             },
             "calculate_hash": {
                 "type": "boolean",
                 "description": "是否计算文件哈希值",
-                "default": false
+                "default": False
             }
         },
         "required": ["file_path"]

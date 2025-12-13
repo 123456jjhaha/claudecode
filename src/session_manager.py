@@ -180,9 +180,15 @@ class Session:
             self._statistics.cost_usd = getattr(result_message, 'total_cost_usd', None)
             self._statistics.final_status = 'failed' if getattr(result_message, 'is_error', False) else 'completed'
 
-            # 更新元数据中的结果摘要
+            # 更新元数据中的结果数组
             if hasattr(result_message, 'result') and result_message.result:
-                self.metadata['result_summary'] = result_message.result[:500]  # 限制长度
+                if 'results' not in self.metadata:
+                    self.metadata['results'] = []
+                self.metadata['results'].append({
+                    "result": result_message.result[:500],  # 限制长度
+                    "timestamp": datetime.now().isoformat(),
+                    "is_error": getattr(result_message, 'is_error', False)
+                })
 
         # 一次性写入所有消息到 messages.jsonl
         if self._messages:
@@ -529,7 +535,11 @@ class SessionManager:
             "start_time": datetime.now().isoformat(),
             "end_time": None,
             "status": "running",
-            "initial_prompt": initial_prompt[:1000],  # 限制长度
+            "prompts": [{
+                "prompt": initial_prompt[:1000],  # 限制长度
+                "timestamp": datetime.now().isoformat()
+            }],
+            "results": [],  # 初始为空，后续在 finalize 时追加
             "depth": depth,
             "parent_session_id": self.parent_session.session_id if self.parent_session else None,
             "context": context or {}

@@ -76,7 +76,6 @@ advanced:
   setting_sources:
     - "project"
     - "user"
-    - "global"
 
   # 环境变量
   env:

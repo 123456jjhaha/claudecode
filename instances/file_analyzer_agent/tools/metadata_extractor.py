@@ -23,17 +23,17 @@ import re
             "extract_exif": {
                 "type": "boolean",
                 "description": "是否提取图像EXIF数据（如果适用）",
-                "default": false
+                "default": False
             },
             "extract_document_props": {
                 "type": "boolean",
                 "description": "是否提取文档属性（如果适用）",
-                "default": true
+                "default": True
             },
             "include_file_hash": {
                 "type": "boolean",
                 "description": "是否计算文件哈希值",
-                "default": false
+                "default": False
             }
         },
         "required": ["file_path"]
@@ -116,7 +116,7 @@ async def extract_metadata(args: Dict[str, Any]) -> Dict[str, Any]:
 def extract_filesystem_metadata(file_path: str) -> Dict[str, Any]:
     """提取文件系统元数据"""
     stat = os.stat(file_path)
-    file_path_obj = os.path
+    file_path_obj = Path(file_path)
 
     return {
         "name": os.path.basename(file_path),

@@ -26,7 +26,7 @@ import re
             "strict": {
                 "type": "boolean",
                 "description": "是否启用严格模式解析",
-                "default": false
+                "default": False
             }
         },
         "required": ["file_path"]

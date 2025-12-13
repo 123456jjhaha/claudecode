@@ -9,7 +9,7 @@ from typing import Any, AsyncIterator, Optional
 from functools import wraps
 from datetime import datetime
 from dataclasses import dataclass
-from claude_agent_sdk import query, ClaudeAgentOptions, SystemMessage
+from claude_agent_sdk import query, ClaudeAgentOptions, SystemMessage, UserMessage
 
 from .config_loader import AgentConfigLoader
 from .tool_manager import ToolManager
@@ -369,6 +369,14 @@ class AgentSystem:
             session.metadata['resumed_at'] = datetime.now().isoformat()
             session._finalized = False
 
+            # 5. 追加新的提示词到 prompts 数组
+            if 'prompts' not in session.metadata:
+                session.metadata['prompts'] = []
+            session.metadata['prompts'].append({
+                "prompt": prompt[:1000],  # 限制长度
+                "timestamp": datetime.now().isoformat()
+            })
+
             set_current_session(session)
 
         elif record_session and self.session_manager:
@@ -391,6 +399,13 @@ class AgentSystem:
         # 创建内部异步生成器
         async def _query_generator():
             try:
+                # 记录用户消息（在调用 query 之前）
+                if session:
+                    # 创建 UserMessage 对象用于记录
+                    from claude_agent_sdk import TextBlock
+                    user_msg = UserMessage([TextBlock(text=prompt)])
+                    await session.record_message(user_msg)
+
                 # 修复：使用异步生成器提示词而不是字符串提示词
                 # 这是为了解决 Claude Agent SDK 的一个已知 bug (Issue #266, #386)
                 # 当使用 SDK MCP 服务器时，字符串提示词会导致 ProcessTransport 错误

@@ -28,7 +28,7 @@ import os
             "use_linter": {
                 "type": "boolean",
                 "description": "是否使用外部linter工具进行更严格的检查",
-                "default": false
+                "default": False
             }
         },
         "required": ["file_path"]
