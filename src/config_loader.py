@@ -166,9 +166,34 @@ class AgentConfigLoader:
             options["model"] = self._config.get("model")
 
             # 系统提示词
-            if "system_prompt_file" in self._config:
-                prompt_file = self._config["system_prompt_file"]
-                options["system_prompt"] = self.load_prompt_file(prompt_file)
+            # 支持多种提示词文件名，避免与 Claude Code 的 CLAUDE.md 冲突
+            prompt_loaded = False
+            prompt_file_names = [
+                self._config.get("system_prompt_file"),  # 用户配置的文件
+                "agent.md",          # 推荐的默认文件名
+                "system_prompt.md",  # 另一个推荐的文件名
+                "agent_prompt.md",   # 可选的文件名
+            ]
+
+            # 过滤掉 None 值
+            prompt_file_names = [name for name in prompt_file_names if name]
+
+            for prompt_file in prompt_file_names:
+                if prompt_file:
+                    try:
+                        options["system_prompt"] = self.load_prompt_file(prompt_file)
+                        prompt_loaded = True
+                        logger.debug(f"成功加载系统提示词文件: {prompt_file}")
+                        break
+                    except Exception as e:
+                        logger.debug(f"无法加载提示词文件 {prompt_file}: {e}")
+                        continue
+
+            # 如果没有找到任何提示词文件，使用默认提示词
+            if not prompt_loaded:
+                default_prompt = self._get_default_system_prompt()
+                options["system_prompt"] = default_prompt
+                logger.info("使用默认系统提示词")
 
             # 工作目录
             if "cwd" in self._config:
@@ -208,6 +233,10 @@ class AgentConfigLoader:
                     options["add_dirs"] = [
                         str(self.resolve_path(d)) for d in advanced["add_dirs"]
                     ]
+
+            # 会话记录配置（传递给 AgentSystem）
+            if "session_recording" in self._config:
+                options["_session_recording_config"] = self._config["session_recording"]
 
             logger.debug("成功生成 ClaudeAgentOptions 参数")
             return options
@@ -269,6 +298,41 @@ class AgentConfigLoader:
     def agent_name(self) -> str:
         """获取 agent 名称"""
         return self._config["agent"]["name"]
+
+    def _get_default_system_prompt(self) -> str:
+        """
+        获取默认系统提示词
+
+        Returns:
+            默认的系统提示词
+        """
+        return """# Claude Agent
+
+你是一个基于 Claude Agent System 运行的 AI 助手。
+
+## 你的能力
+
+你可以使用以下工具：
+- 文件操作（读取、写入、编辑）
+- 代码执行（通过 Bash 命令）
+- 文件搜索（Glob、Grep）
+- 自定义工具（如果配置了）
+- 子实例（如果配置了）
+
+## 工作原则
+
+1. **清晰沟通**：始终以清晰、准确的方式回答问题
+2. **主动思考**：在执行任务前，先思考最佳方案
+3. **谨慎操作**：在进行文件修改等操作时，先确认再执行
+4. **完整响应**：确保完整回答用户的问题
+
+## 特殊说明
+
+- 你的对话会被自动记录，以便后续查询和分析
+- 如果可以，优先使用并行执行提高效率
+- 保持友好和专业的态度
+
+请根据用户的需求，使用合适的工具来完成任务。"""
 
     @property
     @require_config_loaded

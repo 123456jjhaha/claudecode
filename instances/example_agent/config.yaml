@@ -20,7 +20,7 @@ cwd: "."
 tools:
   # 允许的工具列表（支持通配符 *）
   allowed:
-    # 内置工具
+    # 内置工具(默认被全部包含)
     # 自定义工具（来自 tools/ 目录）
     # 格式：mcp__custom_tools__<模块名>__<工具名>
     - "mcp__custom_tools__calculator__*"
@@ -44,9 +44,8 @@ tools:
 
 # ==================== 子 Claude 实例配置 ====================
 # 子实例配置（可选）
-sub_claude_instances:
+# sub_claude_instances:
   # 实例名: 实例目录路径（相对于 instances/ 目录）
-  example_agent2: "example_agent2"
   #document_writer: "document_writer_agent"
 
 # ==================== 高级配置 ====================

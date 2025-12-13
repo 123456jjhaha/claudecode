@@ -1,0 +1,84 @@
+# Claude Agent System - 代码审查专家实例
+#
+# 专业的代码审查助手，专注于代码质量分析、最佳实践建议和潜在问题检测
+
+agent:
+  name: "code_reviewer"
+  description: "专业的代码审查助手，提供代码质量分析和改进建议"
+
+# 使用更强大的模型进行代码分析
+model: "claude-opus-4-5"
+
+# 系统提示词文件
+system_prompt_file: ".claude/agent.md"
+
+# 工作目录
+cwd: "."
+
+# 工具权限配置
+tools:
+  # 禁用不必要的工具
+  disallowed:
+    - "WebFetch"
+    - "WebSearch"
+    - "KillShell"
+    - "Task"
+    - "Skill"
+    - "SlashCommand"
+
+  # 允许的MCP工具
+  allowed:
+    # 内置工具
+    - "Read"
+    - "Write"
+    - "Edit"
+    - "Glob"
+    - "Grep"
+    - "Bash"
+    - "mcp__ide__executeCode"
+    - "mcp__ide__getDiagnostics"
+
+    # 自定义代码审查工具
+    - "mcp__custom_tools__lint_checker__*"
+    - "mcp__custom_tools__code_analyzer__*"
+    - "mcp__custom_tools__style_checker__*"
+
+# 子实例配置（可以有自己的代码审查子任务）
+sub_claude_instances:
+  syntax_checker: "syntax_checker_agent"
+
+# 会话记录配置
+session_recording:
+  enabled: true
+  retention_days: 60              # 代码审查记录保留更长时间
+  max_total_size_mb: 500
+  auto_cleanup: true
+
+  # 记录所有相关消息
+  message_types:
+    - "UserMessage"
+    - "AssistantMessage"
+    - "ResultMessage"
+
+  # 性能优化
+  batch_size: 20                  # 代码审查可能产生大量消息
+  batch_timeout: 5.0
+  queue_size: 2000
+
+  # 内容控制
+  include_content: true
+  include_metadata: true
+
+# 高级配置
+advanced:
+  permission_mode: "acceptEdits"
+  max_turns: 30                   # 代码审查通常不需要过多轮次
+  setting_sources:
+    - "project"
+    - "user"
+    - "global"
+
+  # 环境变量
+  env:
+    PYTHONPATH: "."
+    CODE_REVIEW_MODE: "strict"    # 严格模式审查

@@ -1,0 +1,870 @@
+# Claude Agent System
+
+基于 Claude Agent SDK (Python) 的可扩展智能体系统，具备完整的会话记录和管理功能。
+
+## 核心特性
+
+- 📝 **YAML 配置驱动** - 通过简单的 YAML 文件管理 Claude Agent 实例
+- 🔧 **自动工具发现** - 自动扫描和加载 `tools/` 目录下的自定义工具
+- 🔄 **递归子实例** - 将完整的 Claude 实例封装成工具，支持无限层级嵌套
+- ⚡ **自然并行执行** - 依赖 Claude SDK 自动并行调用工具，无需手动管理
+- 🛠️ **统一工具管理** - 本地工具 + 标准 `.mcp.json` 配置外部 MCP 服务器 + 子实例
+- 📦 **模块化设计** - 清晰的模块划分，易于维护和扩展
+- 🚀 **延迟实例化** - 配置时创建工具定义，调用时才实例化，节省资源
+- 📊 **智能会话记录** - 自动记录所有对话消息，支持层级化存储和查询
+- 🔍 **强大查询系统** - 通过 ID 查询会话详情、生成调用关系图、统计分析
+- ⚙️ **灵活配置系统** - 可配置的消息过滤、性能参数、存储管理策略
+
+## 核心设计理念
+
+### 1. 完整的会话生命周期管理
+
+**设计原则**：每次 Agent 执行都是一次完整的会话，从创建到结束全程记录。
+
+```
+会话生命周期
+  ├─ 创建会话 (generate_session_id)
+  ├─ 启动消息写入器 (AsyncMessageWriter)
+  ├─ 记录所有消息 (UserMessage, AssistantMessage, ResultMessage...)
+  ├─ 更新统计信息 (工具使用、成本、耗时)
+  ├─ 完成会话 (更新元数据)
+  └─ 生成调用关系图 (支持子实例嵌套)
+```
+
+**会话 ID 格式**：`{timestamp}_{counter}_{short_hash}`
+- 示例：`20251211T061755_0001_a3f9c2d8`
+- 保证唯一性和可排序性
+
+### 2. 简化的内存收集系统
+
+**设计原则**：遵循 KISS 原则（Keep It Simple, Stupid），避免过早优化。
+
+```python
+Session 消息收集特性：
+  ├─ 内存收集 (_messages 列表)
+  ├─ 一次性写入 (会话结束时)
+  ├─ 消息类型过滤 (可配置)
+  ├─ 完整的错误处理 (序列化失败不影响主流程)
+  └─ 自动内存释放 (写入后清空列表)
+```
+
+**实现逻辑**：
+1. `record_message()` - 将消息追加到内存列表（无 I/O）
+2. `finalize()` - 检测到 ResultMessage 时一次性写入所有消息
+3. 性能优化：每个会话只有 1 次磁盘写入操作
+4. 内存友好：写入完成后立即清空 `_messages` 列表
+
+### 3. 层级化会话存储
+
+**目录结构**：
+```
+instances/agent_name/sessions/
+└── 20251211T061755_0001_a3f9c2d8/      # 父会话
+    ├── metadata.json                    # 会话元数据
+    ├── messages.jsonl                   # 消息记录（JSON Lines）
+    ├── statistics.json                  # 统计信息
+    ├── call_graph.json                  # 调用关系图
+    └── subsessions/                     # 子会话目录
+        └── 20251211T061800_0001_b4e8d3f9/  # 子会话
+            ├── metadata.json
+            ├── messages.jsonl
+            └── statistics.json
+```
+
+**数据格式**：
+- **metadata.json**: 会话基础信息（ID、时间、状态、深度等）
+- **messages.jsonl**: 逐行 JSON 格式的消息记录
+- **statistics.json**: 性能统计（耗时、轮次、工具使用、成本等）
+- **call_graph.json**: 完整的调用关系树
+
+### 4. 延迟实例化 (Lazy Instantiation)
+
+**设计原则**：配置加载时只创建工具定义，工具被调用时才实例化。
+
+```
+初始化阶段 (initialize):
+  ├─ 加载 config.yaml（包括会话记录配置）
+  ├─ 发现 tools/ 目录下的工具
+  ├─ 创建工具定义（函数签名）
+  ├─ 生成 MCP 服务器配置
+  ├─ 初始化 SessionManager（根据配置）
+  └─ ❌ 不实例化子 Claude（延迟到调用时）
+
+工具调用阶段 (tool execution):
+  ├─ Claude 决定调用某个工具
+  ├─ ✅ 动态创建 AgentSystem 实例
+  ├─ 初始化并执行查询（自动记录会话）
+  └─ 返回结果
+```
+
+### 5. 自然并行执行
+
+**设计原则**：依赖 Claude SDK 的自动并行能力，不手动实现并行逻辑。
+
+```python
+# ❌ 不需要手动实现：
+# await instance_manager.execute_parallel(tasks)
+
+# ✅ 让 Claude 自然决定：
+prompt = "请同时调用 code_reviewer 和 document_writer 子实例"
+result = await agent.query_text(prompt)
+# Claude SDK 自动并行执行工具调用
+# 每个子实例的会话独立记录，并通过 contextvars 自动关联
+```
+
+### 6. 递归嵌套支持
+
+**设计原则**：每一层都是完整的 `AgentSystem`，支持无限嵌套。
+
+```
+Parent Agent (Session ID: 20251211T061755_0001_a3f9c2d8)
+  ├─ Tool: calculator
+  └─ Sub Claude: code_reviewer (Session ID: 20251211T061800_0001_b4e8d3f9)
+       ├─ Tool: lint_checker
+       └─ Sub Claude: syntax_analyzer (Session ID: 20251211T061805_0001_c5e9f4a0)
+            ├─ Tool: parser
+            └─ Sub Claude: ...（继续嵌套）
+```
+
+## 安装
+
+```bash
+# 克隆仓库
+git clone https://github.com/yourusername/claude_agent_system.git
+cd claude_agent_system
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 配置 API 密钥
+cp .env.example .env
+# 编辑 .env 文件，填入你的 ANTHROPIC_API_KEY
+```
+
+## 快速开始
+
+### 1. 主实例使用 - 查看完整执行过程
+
+```python
+import asyncio
+from src import AgentSystem
+
+async def main():
+    # 创建 agent 系统（使用示例实例）
+    agent = AgentSystem("example_agent")
+
+    # 初始化系统（会自动初始化会话管理器）
+    await agent.initialize()
+
+    # 主实例使用 query() - 返回所有消息，包括工具调用、思考过程等
+    async for message in agent.query("使用计算器计算 123 + 456"):
+        message_type = type(message).__name__
+
+        if message_type == "AssistantMessage":
+            # 处理 AI 助手消息（包含文本、工具调用等）
+            from claude_agent_sdk import TextBlock, ToolUseBlock
+            for block in message.content:
+                if isinstance(block, TextBlock):
+                    print(f"AI: {block.text}")
+                elif isinstance(block, ToolUseBlock):
+                    print(f"工具调用: {block.name}({block.input})")
+
+        elif message_type == "ToolResultBlock":
+            # 处理工具结果
+            print(f"工具结果: {message.content}")
+
+        elif message_type == "ResultMessage":
+            # 最终结果
+            print(f"完成: {message.result}")
+
+    # 获取会话 ID
+    print(f"会话 ID: {agent.current_session_id}")
+
+# 运行
+asyncio.run(main())
+```
+
+### 2. 子实例使用 - 只需要最终结果
+
+```python
+import asyncio
+from src import AgentSystem
+
+async def main():
+    # 子实例调用（通常在工具内部）
+    sub_agent = AgentSystem("example_agent")
+    await sub_agent.initialize()
+
+    # 子实例使用 query_text() - 只返回最终结果文本
+    result = await sub_agent.query_text("计算 123 + 456")
+    print(f"结果: {result}")  # 只输出: "579"
+
+    # 获取会话 ID（用于父级记录）
+    print(f"子会话 ID: {sub_agent.current_session_id}")
+
+# 运行
+asyncio.run(main())
+```
+
+### 2. 流式响应与会话记录
+
+```python
+import asyncio
+from src import AgentSystem
+from src.session_query import get_session_details
+
+async def main():
+    agent = AgentSystem("example_agent")
+    await agent.initialize()
+
+    # 流式获取响应（所有消息自动记录）
+    async for message in agent.query("分析这个项目的目录结构"):
+        if hasattr(message, "text"):
+            print(message.text, end="", flush=True)
+
+    # 查询会话详情
+    session_id = agent.current_session_id
+    details = get_session_details("example_agent", session_id)
+
+    print(f"\n\n会话统计:")
+    print(f"- 状态: {details['metadata']['status']}")
+    print(f"- 轮次: {details['statistics']['num_turns']}")
+    print(f"- 成本: ${details['statistics']['cost_usd']:.4f}")
+
+asyncio.run(main())
+```
+
+### 3. 配置会话记录
+
+```yaml
+# config.yaml
+agent:
+  name: "my_agent"
+  description: "我的智能体"
+
+model: "claude-sonnet-4-5"
+# 推荐使用 agent.md 而不是 CLAUDE.md，避免与 Claude Code 项目配置冲突
+system_prompt_file: ".claude/agent.md"
+
+# 会话记录配置
+session_recording:
+  enabled: true                    # 是否启用会话记录
+
+  # 存储管理
+  retention_days: 30               # 保留天数
+  max_total_size_mb: 1000          # 最大总大小（MB）
+  auto_cleanup: true               # 是否自动清理
+
+  # 消息过滤（哪些消息类型要记录）
+  # None 表示记录所有类型（推荐），也可以指定具体类型
+  message_types: null              # 记录所有消息类型
+  # 或者只记录特定类型：
+  # message_types:
+  #   - "UserMessage"       # 用户消息
+  #   - "AssistantMessage"  # AI 助手消息
+  #   - "ResultMessage"     # 结果消息
+  #   - "SystemMessage"     # 系统消息
+  #   - "StreamEvent"       # 流事件
+
+  # 内容控制
+  include_content: true            # 是否包含消息内容
+  include_metadata: true           # 是否包含元数据
+
+# 工具配置
+tools:
+  # 重要：内置工具（Read, Write, Bash 等）默认全部允许
+  # 必须在 disallowed 中明确列出才能禁止
+  disallowed:
+    - "WebFetch"      # 禁止网页获取
+    - "WebSearch"     # 禁止网页搜索
+    - "KillShell"     # 禁止杀死 shell 进程
+
+  # allowed 主要用于限制 MCP 工具（自定义工具、外部 MCP、子实例）
+  # 内置工具不需要在这里列出
+  allowed:
+    - "mcp__custom_tools__calculator__*"
+    - "mcp__sub_instances__sub_claude_*"
+```
+
+## 会话记录和查询系统
+
+### 📊 功能概述
+
+会话记录系统自动记录每次对话的完整信息，支持：
+
+- ✅ **自动记录**：父级和子级 Agent 的所有消息自动保存
+- ✅ **层级化存储**：父子会话通过嵌套目录体现调用关系
+- ✅ **简单高效**：内存收集 + 一次性写入，性能最优
+- ✅ **智能过滤**：可配置的消息类型过滤
+- ✅ **完整查询 API**：通过会话 ID 查询详情、统计、消息列表
+- ✅ **调用关系图**：可视化整个工作流程的调用树
+- ✅ **自动清理**：配置化的过期会话清理机制
+
+### 🔍 查询 API
+
+#### 1. 获取会话详情
+
+```python
+from src.session_query import get_session_details
+
+details = get_session_details(
+    instance_name="example_agent",
+    session_id="20251211T061755_0001_a3f9c2d8"
+)
+
+# 访问各类信息
+metadata = details['metadata']      # 元数据
+statistics = details['statistics']  # 统计信息
+messages = details['messages']      # 消息列表
+subsessions = details['subsessions'] # 子会话列表
+```
+
+#### 2. 列出会话
+
+```python
+from src.session_query import list_sessions
+
+# 列出所有会话
+sessions = list_sessions("example_agent", limit=100)
+
+# 过滤已完成的会话
+completed = list_sessions("example_agent", status="completed")
+```
+
+#### 3. 搜索会话
+
+```python
+from src.session_query import search_sessions
+
+# 按提示词搜索
+results = search_sessions(
+    "example_agent",
+    query="代码审查",
+    field="initial_prompt"
+)
+```
+
+#### 4. 生成调用关系图
+
+```python
+from src.session_query import get_call_graph
+
+graph = get_call_graph("example_agent", session_id)
+
+# 调用关系图结构
+{
+  "root_session_id": "...",
+  "graph": {
+    "session_id": "...",
+    "instance_name": "example_agent",
+    "depth": 0,
+    "children": [
+      {
+        "session_id": "...",
+        "instance_name": "code_reviewer",
+        "depth": 1,
+        "children": [...]
+      }
+    ]
+  }
+}
+```
+
+#### 5. 统计摘要
+
+```python
+from src.session_query import get_session_statistics_summary
+
+summary = get_session_statistics_summary(
+    "example_agent",
+    session_ids=["session1", "session2"]
+)
+
+print(f"总会话数: {summary['total_sessions']}")
+print(f"总成本: ${summary['total_cost_usd']}")
+print(f"工具使用: {summary['tools_usage']}")
+```
+
+#### 6. 导出会话
+
+```python
+from src.session_query import export_session
+
+# 导出为 JSON
+export_session(
+    "example_agent",
+    session_id,
+    output_format="json",
+    output_file="session.json"
+)
+
+# 导出为 Markdown
+export_session(
+    "example_agent",
+    session_id,
+    output_format="markdown",
+    output_file="session.md"
+)
+```
+
+### 🔄 父子会话关系
+
+**父级 Agent**：
+- 返回所有详细消息（流式）
+- 用户可以实时看到执行进度
+- 通过 `agent.current_session_id` 获取会话 ID
+
+**子级 Agent（子实例）**：
+- 只返回最终结果给父级
+- 完整过程记录到文件
+- 在响应的 `_session_metadata` 字段包含会话 ID
+
+**自动关联**：
+- 使用 `contextvars` 实现父子会话自动关联
+- 子会话嵌套在父会话的 `subsessions/` 目录下
+- 无需手动管理会话关系
+
+## 子 Claude 实例（高级特性）
+
+### 核心概念
+
+子 Claude 实例是完整的 `AgentSystem`，可以：
+- 拥有自己的配置和工具
+- 拥有自己的子实例（递归嵌套）
+- 被封装成工具供父 Claude 调用
+- 在工具调用时才实例化（延迟加载）
+- **自动拥有独立的会话记录**
+
+### 创建子实例
+
+#### 1. 创建子实例目录
+```bash
+instances/
+├── parent_agent/              # 父实例
+│   └── config.yaml
+└── code_reviewer_agent/       # 子实例
+    ├── config.yaml            # 完整配置，包括会话记录
+    ├── .claude/
+    │   └── CLAUDE.md          # 子实例的系统提示词
+    └── tools/                 # 子实例可以有自己的工具
+        └── lint.py
+```
+
+#### 2. 配置子实例（config.yaml）
+```yaml
+# code_reviewer_agent/config.yaml
+agent:
+  name: "code_reviewer"
+  description: "专业的代码审查助手"
+
+model: "claude-opus-4-5"  # 可以使用不同的模型
+system_prompt_file: ".claude/CLAUDE.md"
+
+# 子实例也可以有自己的会话记录配置！
+session_recording:
+  enabled: true
+  retention_days: 60        # 不同的保留策略
+  message_types: null       # 记录所有消息类型（推荐）
+  # 或只记录特定类型：
+  # message_types:
+  #   - "UserMessage"
+  #   - "AssistantMessage"
+  #   - "ResultMessage"
+
+tools:
+  allowed:
+    - "Read"
+    - "Grep"
+    - "mcp__custom_tools__lint__*"
+
+# 子实例也可以有自己的子实例！
+sub_claude_instances:
+  syntax_checker: "syntax_checker_agent"
+```
+
+### 使用子实例
+
+```python
+agent = AgentSystem("parent_agent")
+await agent.initialize()
+
+# Claude 会自动决定何时使用子实例工具
+prompt = """
+请审查以下代码文件：
+- src/main.py
+- src/utils.py
+
+使用 code_reviewer 子实例进行详细分析。
+"""
+
+result = await agent.query_text(prompt)
+# 会话记录：
+# - 父会话：20251211T061755_0001_a3f9c2d8
+#   └─ 子会话：20251211T061800_0001_b4e8d3f9 (code_reviewer)
+```
+
+## 系统架构
+
+### 整体架构图
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     AgentSystem                         │
+│  (主类，整合所有组件，包括会话管理)                       │
+└─────────────────────────────────────────────────────────┘
+              ▲         ▲          ▲          ▲
+              │         │          │          │
+      ┌───────┘    ┌────┘     ┌────┘     ┌────┘
+      │            │          │          │
+┌─────┴─────┐ ┌───┴────┐ ┌───┴────┐ ┌───┴────────┐
+│  Config   │ │ Tool   │ │Session  │ │   Claude   │
+│  Loader   │ │Manager │ │Manager  │ │  SDK/API   │
+└───────────┘ └────────┘ └────────┘ └────────────┘
+      │            │          │
+      │            │          │
+  ┌───▼───┐   ┌───▼───┐  ┌───▼────────┐
+  │ YAML  │   │tools/ │  │ Sub Claude │
+  │ File  │   │ @tool │  │  Instance  │
+  └───────┘   └───────┘  └────────────┘
+                                │
+                         (递归 AgentSystem)
+```
+
+### 执行流程（包含会话记录）
+
+#### 初始化流程
+```
+1. 创建 AgentSystem(instance_name)
+   │
+2. await agent.initialize()
+   │
+   ├─> ConfigLoader.load() (读取会话记录配置)
+   │   ├─ 读取 config.yaml
+   │   ├─ 验证配置（包括 session_recording）
+   │   └─ 解析路径和环境变量
+   │
+   ├─> ToolManager.discover_tools()
+   │   ├─ 扫描 tools/ 目录
+   │   └─ 提取 @tool 装饰的函数
+   │
+   ├─> InstanceManager.load_instances()
+   │   ├─ 读取子实例配置
+   │   └─ 创建工具定义（不实例化）
+   │
+   ├─> SessionManager.__init__()
+   │   ├─ 合并会话记录配置和默认值
+   │   ├─ 创建 sessions/ 目录
+   │   └─ 设置消息过滤、性能参数等
+   │
+   └─> 合并所有 MCP 服务器并生成 ClaudeAgentOptions
+```
+
+#### 查询执行流程（包含会话记录）
+```
+1. await agent.query(prompt)
+   │
+2. 创建新会话
+   │   ├─ 生成唯一会话 ID
+   │   ├─ 创建会话目录
+   │   ├─ 启动 AsyncMessageWriter
+   │   └─ 记录初始元数据
+   │
+3. 执行 Claude SDK 查询
+   │   ├─ 记录 UserMessage
+   │   ├─ 记录所有 AssistantMessage
+   │   ├─ 记录工具调用（ToolUseBlock）
+   │   ├─ 记录工具结果（ToolResultBlock）
+   │   └─ 处理子实例调用
+   │       ├─ 创建子 AgentSystem
+   │       ├─ 子实例自动继承会话配置
+   │       ├─ 创建子会话（嵌套在 subsessions/）
+   │       └─ 子会话完整记录
+   │
+4. 完成 ResultMessage
+   │   ├─ 记录最终结果
+   │   ├─ 更新统计信息（耗时、成本、工具使用）
+   │   ├─ 生成调用关系图
+   │   └─ 停止 AsyncMessageWriter
+   │
+5. 返回结果给用户
+```
+
+## 项目结构
+
+```
+claude_agent_system/
+├── src/                              # 核心框架源码
+│   ├── agent_system.py              # 系统主类（整合所有组件）
+│   ├── config_loader.py             # 配置加载器
+│   ├── config_validator.py          # 配置验证器（包含会话记录验证）
+│   ├── tool_manager.py              # 工具管理器
+│   ├── claude_instance_wrapper.py   # 子实例封装（延迟实例化）
+│   ├── instance_manager.py          # 子实例管理器
+│   ├── session_manager.py           # 会话管理器（核心新增）
+│   ├── session_context.py           # 会话上下文管理
+│   ├── session_query.py             # 会话查询 API
+│   ├── error_handling.py            # 自定义异常
+│   ├── logging_config.py            # 日志配置
+│   └── __init__.py                  # 模块导出
+│
+├── instances/                        # 工作实例目录
+│   └── example_agent/               # 示例实例
+│       ├── config.yaml              # 实例配置文件
+│       ├── .claude/                 # Claude 标准配置
+│       │   ├── CLAUDE.md           # 系统提示词
+│       │   ├── agents/             # 子代理定义
+│       │   ├── commands/           # 自定义命令
+│       │   ├── skills/             # 技能定义
+│       │   └── hooks/              # 钩子脚本
+│       ├── tools/                   # 自定义工具
+│       │   ├── __init__.py
+│       │   └── calculator.py        # 示例工具
+│       └── sessions/                 # 会话记录目录（自动创建）
+│           └── 20251211T061755_0001_a3f9c2d8/
+│
+├── examples/                         # 使用示例
+│   ├── basic_usage.py               # 基础使用
+│   ├── parallel_execution.py        # 并行执行
+│   ├── custom_tools.py              # 自定义工具
+│   └── session_recording.py         # 会话记录示例
+│
+├── requirements.txt                  # 依赖列表
+├── README.md                         # 项目文档
+└── .env.example                      # 环境变量示例
+```
+
+## API 文档
+
+### AgentSystem
+
+主类，用于管理和运行 Claude Agent 实例。
+
+**初始化**
+
+```python
+agent = AgentSystem(
+    instance_name="example_agent",  # 实例名称或实例目录路径
+    instances_root=None             # 实例根目录（可选）
+)
+```
+
+**方法**
+
+- `async initialize()` - 初始化系统（包括会话管理器）
+- `async query(prompt: str)` - 执行查询，返回异步迭代器
+- `async query_text(prompt: str)` - 执行查询，返回文本字符串
+
+**属性**
+
+- `agent_name` - Agent 名称
+- `agent_description` - Agent 描述
+- `tools_count` - 工具数量
+- `instances_count` - 子实例数量
+- `current_session_id` - 当前会话 ID
+
+## 性能优化建议
+
+### 1. 会话记录配置优化
+
+```yaml
+session_recording:
+  # 标准配置（推荐）
+  enabled: true
+  message_types: null      # 记录所有消息类型
+  include_content: true
+  include_metadata: true
+
+  # 减少存储空间
+  message_types:           # 只记录必要消息
+    - "UserMessage"
+    - "ResultMessage"
+  include_content: false   # 不记录消息内容
+  include_metadata: false  # 不记录元数据
+```
+
+### 2. 消息过滤优化
+
+```yaml
+# 只记录关键消息，减少存储开销
+session_recording:
+  message_types:
+    - "ResultMessage"     # 只记录结果
+  include_metadata: false  # 不记录详细元数据
+  include_content: false   # 不记录消息内容
+```
+
+### 3. 存储管理策略
+
+```yaml
+session_recording:
+  retention_days: 7        # 短期保留策略
+  max_total_size_mb: 100   # 限制总大小
+  auto_cleanup: true       # 启用自动清理
+```
+
+## 错误处理
+
+```python
+from src import AgentSystem, AgentSystemError
+from src.session_query import SessionQueryError
+
+try:
+    agent = AgentSystem("example_agent")
+    await agent.initialize()
+except AgentSystemError as e:
+    print(f"系统错误: {e}")
+
+try:
+    details = get_session_details("agent", session_id)
+except SessionQueryError as e:
+    print(f"会话查询错误: {e}")
+```
+
+## 完整示例：demo_agent
+
+我们在 `instances/demo_agent/` 中提供了一个完整的示例实例，展示了系统的所有功能：
+
+### 目录结构
+```
+instances/demo_agent/
+├── config.yaml              # 完整的配置文件
+├── .claude/                 # Claude 标准配置目录
+│   ├── agent.md            # 系统提示词（推荐使用，避免与 CLAUDE.md 冲突）
+│   ├── .mcp.json           # 外部 MCP 服务器配置
+│   ├── agents/             # 子代理定义
+│   │   └── code_reviewer.md
+│   └── skills/             # 技能定义
+│       └── project_analysis.md
+└── tools/                   # 自定义工具
+    ├── __init__.py
+    ├── calculator.py        # 数学计算工具
+    ├── file_analyzer.py     # 文件分析工具
+    └── text_processor.py    # 文本处理工具
+```
+
+### 使用示例
+```python
+import asyncio
+from src import AgentSystem
+
+async def main():
+    # 使用完整示例
+    agent = AgentSystem("demo_agent")
+    await agent.initialize()
+
+    # 演示多种功能
+    prompt = """
+    请演示你的能力：
+    1. 使用计算器计算 2^10
+    2. 分析 config.yaml 文件
+    3. 统计 README.md 的文本信息
+    4. 提取关键词
+    """
+
+    result = await agent.query_text(prompt)
+    print(result)
+
+    # 查看会话记录
+    print(f"会话 ID: {agent.current_session_id}")
+
+asyncio.run(main())
+```
+
+### 常见问题
+
+#### 会话记录相关
+
+**Q1: 会话记录会影响性能吗？**
+A: 几乎不会。消息在内存中收集，会话结束时一次性写入磁盘（每个会话只有 1 次 I/O 操作），性能影响极小。
+
+**Q2: 可以只记录特定类型的消息吗？**
+A: 可以。通过 `message_types` 配置要记录的消息类型，支持过滤掉不必要的消息。
+
+**Q3: 如何查看子实例的执行过程？**
+A: 子实例会创建独立的会话记录，嵌套在父会话的 `subsessions/` 目录下，可通过调用关系图查看完整流程。
+
+**Q4: 会话数据存储在哪里？**
+A: 存储在 `instances/{agent_name}/sessions/` 目录下，每个会话一个目录，包含元数据、消息、统计等信息。
+
+**Q5: 如何管理大量会话数据？**
+A: 配置 `retention_days` 和 `max_total_size_mb` 参数，启用 `auto_cleanup` 自动清理过期数据。
+
+#### 工具权限管理
+
+**Q6: 为什么在 allowed 中列出内置工具但仍然可以使用？**
+A: **这是一个重要的设计特点**：内置的 Claude 工具（如 Read, Write, Bash 等）默认全部允许。`allowed` 列表主要用于限制 MCP 工具（自定义工具、外部 MCP 服务器、子实例）。要禁止内置工具，必须在 `disallowed` 中明确列出。
+
+**Q7: 如何正确配置工具权限？**
+A: 推荐的配置方式：
+
+```yaml
+tools:
+  # 禁止特定的内置工具（可选）
+  disallowed:
+    - "WebFetch"    # 禁止网页访问
+    - "WebSearch"   # 禁止网络搜索
+    - "KillShell"   # 禁止危险操作
+
+  # 允许特定的 MCP 工具
+  allowed:
+    # 自定义工具
+    - "mcp__custom_tools__calculator__*"
+
+    # 子实例工具
+    - "mcp__sub_instances__sub_claude_*"
+
+    # 外部 MCP 服务器
+    - "mcp__external_database__*"
+```
+
+**Q8: 什么是 MCP 工具？**
+A: MCP (Model Context Protocol) 工具包括：
+- **自定义工具**：`tools/` 目录下用 `@tool` 装饰器定义的工具
+- **子实例工具**：封装成工具的子 Claude 实例
+- **外部 MCP 服务器**：通过 `.mcp.json` 配置的外部服务
+
+**Q9: 如何使用通配符？**
+A: 工具名称支持 `*` 通配符：
+- `"mcp__custom_tools__*"` - 所有自定义工具
+- `"mcp__sub_instances__sub_claude_*"` - 所有子实例工具
+- `"Read*"` - 所有以 Read 开头的工具（如果有）
+
+#### 提示词文件配置
+
+**Q10: 为什么不应该使用 CLAUDE.md 作为系统提示词文件？**
+A: **重要**：`CLAUDE.md` 是 Claude Code 的项目配置文件名，使用它可能会导致：
+- 与 Claude Code 的项目级配置冲突
+- 提示词被意外覆盖或读取错误的内容
+- 混淆 Claude Code 配置和 Agent System 配置
+
+**Q11: 推荐使用什么文件名？**
+A: 推荐的提示词文件名（按优先级）：
+1. **`agent.md`** (最推荐) - 简洁明了
+2. `system_prompt.md` - 描述性强
+3. `agent_prompt.md` - 清晰的表达
+4. `prompt.md` - 简单直接
+
+**Q12: 如果没有配置提示词文件会怎样？**
+A: 系统会自动按以下顺序查找提示词文件：
+1. 用户配置的 `system_prompt_file`
+2. `agent.md`
+3. `system_prompt.md`
+4. `agent_prompt.md`
+
+如果都没找到，系统会使用内置的默认提示词，包含基础的 Agent 行为指导。
+
+**Q13: 配置示例**
+A:
+```yaml
+# 好的配置
+agent:
+  name: "my_agent"
+model: "claude-sonnet-4-5"
+system_prompt_file: ".claude/agent.md"  # 推荐
+
+# 或不配置（系统会自动查找 agent.md）
+agent:
+  name: "my_agent"
+model: "claude-sonnet-4-5"
+# system_prompt_file: .claude/agent.md  # 可选，系统会自动查找
+```

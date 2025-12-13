@@ -113,6 +113,9 @@ class AgentSystem:
             logger.info("加载子实例...")
             sub_instances_config = options_dict.get("_sub_instances_config", {})
 
+            # 保存会话记录配置（需要在创建 options 前提取）
+            session_recording_config = options_dict.get("_session_recording_config", {})
+
             if sub_instances_config:
                 self.instance_manager = InstanceManager(
                     instances_config=sub_instances_config,
@@ -155,6 +158,7 @@ class AgentSystem:
 
             # 移除内部使用的自定义字段
             options_dict.pop("_sub_instances_config", None)
+            options_dict.pop("_session_recording_config", None)
 
             # 设置完整的 MCP 服务器配置
             if all_mcp_servers:
@@ -173,7 +177,8 @@ class AgentSystem:
             parent_session = get_current_session()
             self.session_manager = SessionManager(
                 instance_path=self.instance_path,
-                parent_session=parent_session
+                parent_session=parent_session,
+                config=session_recording_config
             )
 
             self._initialized = True
@@ -320,10 +325,12 @@ class AgentSystem:
                     await session.record_message(message)
 
                 # 返回消息（流式）
-                yield message
 
+                yield message
                 # 检查是否是 ResultMessage（会话结束）
-                if hasattr(message, 'subtype'):  # ResultMessage
+                message_type = type(message).__name__
+
+                if message_type == "ResultMessage":
                     if session:
                         await session.finalize(result_message=message)
 
@@ -349,14 +356,17 @@ class AgentSystem:
 
     async def query_text(self, prompt: str, record_session: bool = True) -> str:
         """
-        执行查询并返回文本响应（支持会话记录）
+        执行查询并返回最终文本结果（支持会话记录）
+
+        只返回 ResultMessage 中的 result 文本，不返回过程中的 AssistantMessage 文本。
+        适用于子实例调用，只需要最终结果而不需要查看执行过程。
 
         Args:
             prompt: 查询提示词
             record_session: 是否记录会话
 
         Returns:
-            文本响应
+            ResultMessage 中的 result 文本，如果没有则返回空字符串
 
         Raises:
             AgentSystemError: 查询失败
@@ -364,21 +374,12 @@ class AgentSystem:
         result_text = ""
 
         async for message in self.query(prompt, record_session=record_session):
-            # 修复：正确提取文本
-            # AssistantMessage 包含 content 列表，需要遍历 TextBlock
+            # 只获取 ResultMessage 的 result
             message_type = type(message).__name__
 
-            if message_type == "AssistantMessage":
-                from claude_agent_sdk import TextBlock
-
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        result_text += block.text
-
-            elif message_type == "ResultMessage":
-                # ResultMessage 可能包含最终结果
+            if message_type == "ResultMessage":
                 if hasattr(message, 'result') and message.result:
-                    result_text += message.result
+                   result_text = message.result
 
         return result_text
 

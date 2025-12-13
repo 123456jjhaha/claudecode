@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "external_database": {
+      "command": "echo",
+      "args": ["Database MCP server (example)"],
+      "type": "stdio"
+    },
+    "external_api": {
+      "command": "echo",
+      "args": ["External API MCP server (example)"],
+      "type": "stdio"
+    }
+  }
+}

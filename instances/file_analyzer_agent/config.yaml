@@ -1,0 +1,84 @@
+# Claude Agent System - 文件分析专家实例
+#
+# 专业的文件分析助手，专注于文件类型检测、内容分析和元数据提取
+
+agent:
+  name: "file_analyzer"
+  description: "文件分析专家，支持多种文件格式的深度分析"
+
+# 使用平衡的模型
+model: "claude-sonnet-4-5"
+
+# 系统提示词文件
+system_prompt_file: ".claude/agent.md"
+
+# 工作目录
+cwd: "."
+
+# 工具权限配置
+tools:
+  # 禁用不必要的工具
+  disallowed:
+    - "WebFetch"
+    - "WebSearch"
+    - "KillShell"
+    - "Task"
+    - "Skill"
+    - "SlashCommand"
+    - "Write"    # 文件分析器不应修改文件
+    - "Edit"     # 文件分析器不应修改文件
+
+  # 允许的工具（只读分析）
+  allowed:
+    # 基础工具
+    - "Read"
+    - "Glob"
+    - "Grep"
+    - "Bash"     # 用于文件系统命令
+    - "mcp__ide__executeCode"
+
+    # 自定义文件分析工具
+    - "mcp__custom_tools__file_detector__*"
+    - "mcp__custom_tools__content_analyzer__*"
+    - "mcp__custom_tools__metadata_extractor__*"
+
+# 会话记录配置
+session_recording:
+  enabled: true
+  retention_days: 45               # 文件分析记录保留时间较长
+  max_total_size_mb: 800           # 中等存储需求
+  auto_cleanup: true
+
+  # 记录所有消息
+  message_types:
+    - "UserMessage"
+    - "AssistantMessage"
+    - "ResultMessage"
+
+  # 性能配置
+  batch_size: 15
+  batch_timeout: 8.0
+  queue_size: 1500
+
+  # 内容控制
+  include_content: true
+  include_metadata: true
+
+# 高级配置
+advanced:
+  permission_mode: "acceptEdits"
+  max_turns: 25                   # 文件分析通常需要多轮交互
+  setting_sources:
+    - "project"
+    - "user"
+    - "global"
+
+  # 环境变量
+  env:
+    PYTHONPATH: "."
+    FILE_ANALYSIS_DEPTH: "deep"   # 深度分析模式
+
+  # 额外的目录访问权限
+  add_dirs:
+    - "../data"                   # 允许访问数据目录
+    - "./logs"                    # 允许访问日志目录

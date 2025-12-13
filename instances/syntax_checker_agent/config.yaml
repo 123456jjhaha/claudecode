@@ -1,0 +1,79 @@
+# Claude Agent System - 语法检查专家实例
+#
+# 专注于语法分析、错误检测和代码解析的轻量级助手
+
+agent:
+  name: "syntax_checker"
+  description: "语法检查专家，专注于代码语法分析和错误检测"
+
+# 使用快速模型进行语法检查
+model: "claude-sonnet-4-5"
+
+# 系统提示词文件
+system_prompt_file: ".claude/agent.md"
+
+# 工作目录
+cwd: "."
+
+# 工具权限配置
+tools:
+  # 禁用不必要的工具
+  disallowed:
+    - "WebFetch"
+    - "WebSearch"
+    - "KillShell"
+    - "Task"
+    - "Skill"
+    - "SlashCommand"
+    - "Write"  # 语法检查器不应该修改文件
+    - "Edit"   # 语法检查器不应该修改文件
+
+  # 允许的工具（只读）
+  allowed:
+    # 基础工具
+    - "Read"
+    - "Glob"
+    - "Grep"
+    - "Bash"   # 用于运行语法检查命令
+    - "mcp__ide__executeCode"
+    - "mcp__ide__getDiagnostics"
+
+    # 自定义语法检查工具
+    - "mcp__custom_tools__parser__*"
+    - "mcp__custom_tools__validator__*"
+
+# 会话记录配置
+session_recording:
+  enabled: true
+  retention_days: 30               # 语法检查记录保留时间适中
+  max_total_size_mb: 200           # 较小的存储需求
+  auto_cleanup: true
+
+  # 记录关键消息
+  message_types:
+    - "UserMessage"
+    - "ResultMessage"     # 主要记录结果
+    # - "AssistantMessage"  # 减少消息量
+
+  # 性能优化
+  batch_size: 50                  # 批量处理更多消息
+  batch_timeout: 15.0             # 更长的超时
+  queue_size: 3000                # 更大的队列
+
+  # 内容控制
+  include_content: true
+  include_metadata: true
+
+# 高级配置
+advanced:
+  permission_mode: "acceptEdits"
+  max_turns: 20                   # 语法检查通常很快
+  setting_sources:
+    - "project"
+    - "user"
+    - "global"
+
+  # 环境变量
+  env:
+    PYTHONPATH: "."
+    SYNTAX_CHECK_STRICT: "true"   # 启用严格模式检查
