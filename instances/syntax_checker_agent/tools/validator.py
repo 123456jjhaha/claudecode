@@ -2,7 +2,6 @@
 语法验证器工具 - 验证代码语法正确性
 """
 
-from claude_agent_sdk import tool
 from typing import Dict, Any, List
 import ast
 import subprocess
@@ -10,44 +9,18 @@ import sys
 import tempfile
 import os
 
-@tool(
-    name="validate_syntax",
-    description="验证代码文件的语法正确性，支持多种语言",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "要验证的文件路径"
-            },
-            "language": {
-                "type": "string",
-                "description": "语言类型（可选，自动检测）",
-                "enum": ["python", "javascript", "json", "yaml", "html", "css", "auto"]
-            },
-            "use_linter": {
-                "type": "boolean",
-                "description": "是否使用外部linter工具进行更严格的检查",
-                "default": False
-            }
-        },
-        "required": ["file_path"]
-    }
-)
-async def validate_syntax(args: Dict[str, Any]) -> Dict[str, Any]:
+async def validate_syntax(file_path: str, language: str = "auto", use_linter: bool = False) -> Dict[str, Any]:
     """
     验证代码语法正确性
 
     Args:
-        args: 包含文件路径、语言类型和linter选项的字典
+        file_path: 要验证的文件路径
+        language: 语言类型（可选，自动检测）
+        use_linter: 是否使用外部linter工具进行更严格的检查
 
     Returns:
         验证结果
     """
-    file_path = args.get("file_path", "")
-    language = args.get("language", "auto")
-    use_linter = args.get("use_linter", False)
-
     # 自动检测语言
     if language == "auto":
         language = detect_language(file_path)
@@ -86,73 +59,98 @@ async def validate_syntax(args: Dict[str, Any]) -> Dict[str, Any]:
         validation_result["valid"] = len(validation_result["errors"]) == 0
 
         # 生成报告
-        status_emoji = "✅" if validation_result["valid"] else "❌"
-        report_lines = [
-            f"## 语法验证结果",
-            f"**文件**: {file_path}",
-            f"**语言**: {language}",
-            f"**状态**: {status_emoji} {'通过' if validation_result['valid'] else '失败'}",
-            f"**错误数**: {len(validation_result['errors'])}",
-            f"**警告数**: {len(validation_result['warnings'])}",
-            "",
-        ]
-
-        # 错误详情
-        if validation_result["errors"]:
-            report_lines.append("### ❌ 语法错误")
-            for error in validation_result["errors"][:10]:
-                if isinstance(error, dict):
-                    report_lines.append(
-                        f"- **{error.get('type', 'Error')}** (第{error.get('line', '?')}行)\n"
-                        f"  {error.get('message', 'Unknown error')}"
-                    )
-                else:
-                    report_lines.append(f"- {error}")
-
-        # 警告详情
-        if validation_result["warnings"]:
-            report_lines.append("\n### ⚠️ 警告")
-            for warning in validation_result["warnings"][:5]:
-                if isinstance(warning, dict):
-                    report_lines.append(f"- {warning.get('message', 'Warning')}")
-                else:
-                    report_lines.append(f"- {warning}")
-
-        # Linter结果
-        if validation_result.get("lint_results"):
-            report_lines.append("\n### 🔍 Linter检查")
-            lint = validation_result["lint_results"]
-            report_lines.append(f"- 检查工具: {lint.get('tool', 'Unknown')}")
-            report_lines.append(f"- 发现问题: {len(lint.get('issues', []))}")
-            if lint.get("score"):
-                report_lines.append(f"- 评分: {lint['score']}/10")
-
-        if validation_result["valid"]:
-            report_lines.append("\n🎉 语法验证通过！代码结构正确。")
+        report = generate_validation_report(validation_result)
 
         return {
-            "content": [{
-                "type": "text",
-                "text": "\n".join(report_lines)
-            }],
-            "validation_result": validation_result
+            "success": True,
+            "validation_result": validation_result,
+            "report": report
         }
 
     except FileNotFoundError:
         return {
-            "content": [{
-                "type": "text",
-                "text": f"❌ 错误: 找不到文件 {file_path}"
-            }],
-            "error": "file_not_found"
+            "success": False,
+            "error": "file_not_found",
+            "message": f"找不到文件: {file_path}"
         }
     except Exception as e:
         return {
-            "content": [{
-                "type": "text",
-                "text": f"❌ 验证失败: {str(e)}"
-            }],
-            "error": str(e)
+            "success": False,
+            "error": str(e),
+            "message": f"验证失败: {str(e)}"
+        }
+
+async def quick_validate(file_path: str) -> Dict[str, Any]:
+    """
+    快速验证语法
+
+    Args:
+        file_path: 要验证的文件路径
+
+    Returns:
+        快速验证结果
+    """
+    try:
+        # 自动检测语言
+        language = detect_language(file_path)
+
+        # 读取文件
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        result = {
+            "file_path": file_path,
+            "language": language,
+            "valid": True,
+            "errors": []
+        }
+
+        # 基础语法检查
+        if language == "python":
+            try:
+                ast.parse(content)
+            except SyntaxError as e:
+                result["valid"] = False
+                result["errors"].append({
+                    "type": "SyntaxError",
+                    "line": e.lineno,
+                    "message": e.msg
+                })
+
+        elif language == "json":
+            import json
+            try:
+                json.loads(content)
+            except json.JSONDecodeError as e:
+                result["valid"] = False
+                result["errors"].append({
+                    "type": "JSONDecodeError",
+                    "line": e.lineno,
+                    "message": e.msg
+                })
+
+        elif language == "yaml":
+            try:
+                import yaml
+                yaml.safe_load(content)
+            except yaml.YAMLError as e:
+                result["valid"] = False
+                result["errors"].append({
+                    "type": "YAMLError",
+                    "message": str(e)
+                })
+
+        return {
+            "success": True,
+            "result": result,
+            "summary": f"✅ 语法正确" if result["valid"] else f"❌ 发现 {len(result['errors'])} 个错误"
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": f"快速验证失败: {str(e)}"
         }
 
 def detect_language(file_path: str) -> str:
@@ -417,3 +415,51 @@ def run_python_linter(content: str) -> Dict[str, Any]:
         result["score"] = 10
 
     return result
+
+def generate_validation_report(validation_result: Dict[str, Any]) -> str:
+    """生成验证报告"""
+    status_emoji = "✅" if validation_result["valid"] else "❌"
+    report_lines = [
+        f"## 语法验证结果",
+        f"**文件**: {validation_result['file_path']}",
+        f"**语言**: {validation_result['language']}",
+        f"**状态**: {status_emoji} {'通过' if validation_result['valid'] else '失败'}",
+        f"**错误数**: {len(validation_result['errors'])}",
+        f"**警告数**: {len(validation_result['warnings'])}",
+        "",
+    ]
+
+    # 错误详情
+    if validation_result["errors"]:
+        report_lines.append("### ❌ 语法错误")
+        for error in validation_result["errors"][:10]:
+            if isinstance(error, dict):
+                report_lines.append(
+                    f"- **{error.get('type', 'Error')}** (第{error.get('line', '?')}行)\n"
+                    f"  {error.get('message', 'Unknown error')}"
+                )
+            else:
+                report_lines.append(f"- {error}")
+
+    # 警告详情
+    if validation_result["warnings"]:
+        report_lines.append("\n### ⚠️ 警告")
+        for warning in validation_result["warnings"][:5]:
+            if isinstance(warning, dict):
+                report_lines.append(f"- {warning.get('message', 'Warning')}")
+            else:
+                report_lines.append(f"- {warning}")
+
+    # Linter结果
+    if validation_result.get("lint_results"):
+        report_lines.append("\n### 🔍 Linter检查")
+        lint = validation_result["lint_results"]
+        report_lines.append(f"- 检查工具: {lint.get('tool', 'Unknown')}")
+        report_lines.append(f"- 发现问题: {len(lint.get('issues', []))}")
+        if lint.get("score"):
+            report_lines.append(f"- 评分: {lint['score']}/10")
+
+    if validation_result["valid"]:
+        report_lines.append("\n🎉 语法验证通过！代码结构正确。")
+
+    return "\n".join(report_lines)

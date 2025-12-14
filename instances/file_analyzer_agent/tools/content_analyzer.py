@@ -2,59 +2,26 @@
 内容分析器工具 - 深度分析文件内容和结构
 """
 
-from claude_agent_sdk import tool
-from typing import Dict, Any, List, Union
+from typing import Dict, Any, List
 import re
 import json
 import ast
 import xml.etree.ElementTree as ET
-from collections import Counter, defaultdict
+from collections import Counter
 
-@tool(
-    name="analyze_content",
-    description="深度分析文件内容，提取结构、统计和语义信息",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "要分析的文件路径"
-            },
-            "analysis_depth": {
-                "type": "string",
-                "description": "分析深度",
-                "enum": ["basic", "detailed", "full"],
-                "default": "detailed"
-            },
-            "include_statistics": {
-                "type": "boolean",
-                "description": "是否包含统计分析",
-                "default": True
-            },
-            "max_sample_size": {
-                "type": "integer",
-                "description": "大文件的最大采样大小（KB）",
-                "default": 1000
-            }
-        },
-        "required": ["file_path"]
-    }
-)
-async def analyze_content(args: Dict[str, Any]) -> Dict[str, Any]:
+async def analyze_content(file_path: str, analysis_depth: str = "detailed", include_statistics: bool = True, max_sample_size: int = 1000) -> Dict[str, Any]:
     """
     分析文件内容和结构
 
     Args:
-        args: 包含文件路径和分析选项的字典
+        file_path: 要分析的文件路径
+        analysis_depth: 分析深度 (basic, detailed, full)
+        include_statistics: 是否包含统计分析
+        max_sample_size: 大文件的最大采样大小（KB）
 
     Returns:
         内容分析结果
     """
-    file_path = args.get("file_path", "")
-    analysis_depth = args.get("analysis_depth", "detailed")
-    include_statistics = args.get("include_statistics", True)
-    max_sample_size = args.get("max_sample_size", 1000)
-
     try:
         # 读取文件内容
         content, is_sampled = read_file_content(file_path, max_sample_size * 1024)
@@ -94,20 +61,72 @@ async def analyze_content(args: Dict[str, Any]) -> Dict[str, Any]:
         report = generate_analysis_report(analysis_result)
 
         return {
-            "content": [{
-                "type": "text",
-                "text": report
-            }],
-            "analysis_result": analysis_result
+            "success": True,
+            "analysis_result": analysis_result,
+            "report": report
         }
 
     except Exception as e:
         return {
-            "content": [{
-                "type": "text",
-                "text": f"❌ 分析失败: {str(e)}"
-            }],
-            "error": str(e)
+            "success": False,
+            "error": str(e),
+            "message": f"分析失败: {str(e)}"
+        }
+
+async def quick_content_scan(file_path: str, scan_lines: int = 50) -> Dict[str, Any]:
+    """
+    快速扫描文件内容
+
+    Args:
+        file_path: 要扫描的文件路径
+        scan_lines: 要扫描的行数
+
+    Returns:
+        快速扫描结果
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = []
+            for i, line in enumerate(f):
+                if i >= scan_lines:
+                    break
+                lines.append(line.rstrip('\n'))
+
+        content_preview = '\n'.join(lines)
+        file_type = detect_content_type(file_path, content_preview)
+
+        # 基础分析
+        word_count = len(re.findall(r'\b\w+\b', content_preview))
+        char_count = len(content_preview)
+
+        # 检测常见模式
+        patterns = {
+            "has_functions": bool(re.search(r'(def|function)\s+\w+', content_preview)),
+            "has_classes": bool(re.search(r'class\s+\w+', content_preview)),
+            "has_imports": bool(re.search(r'(import|from)\s+\w+', content_preview)),
+            "has_comments": '//' in content_preview or '#' in content_preview,
+            "has_markup": '<' in content_preview and '>' in content_preview
+        }
+
+        return {
+            "success": True,
+            "file_path": file_path,
+            "file_type": file_type,
+            "preview": content_preview,
+            "lines_scanned": len(lines),
+            "basic_stats": {
+                "word_count": word_count,
+                "char_count": char_count,
+                "line_count": len(lines)
+            },
+            "patterns": patterns
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": f"快速扫描失败: {str(e)}"
         }
 
 def read_file_content(file_path: str, max_size: int) -> tuple[str, bool]:

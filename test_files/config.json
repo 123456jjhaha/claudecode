@@ -1,0 +1,21 @@
+{
+    "app": {
+        "name": "Test Application",
+        "version": "1.0.0",
+        "debug": true,
+        "settings": {
+            "timeout": 30,
+            "retries": 3,
+            "features": ["auth", "logging", "cache"]
+        }
+    },
+    "database": {
+        "host": "localhost",
+        "port": 5432,
+        "name": "testdb",
+        "credentials": {
+            "username": "admin",
+            "password": "secret"
+        }
+    }
+}

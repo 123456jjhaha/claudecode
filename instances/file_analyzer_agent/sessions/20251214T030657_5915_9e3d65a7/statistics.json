@@ -1,0 +1,32 @@
+{
+  "session_id": "20251214T030657_5915_9e3d65a7",
+  "total_duration_ms": 9466,
+  "api_duration_ms": 12593,
+  "num_turns": 4,
+  "num_messages": 10,
+  "num_tool_calls": 3,
+  "tools_used": {
+    "mcp__custom_tools__file_detector__detect_file_type": 1,
+    "mcp__custom_tools__file_detector__quick_file_info": 1,
+    "mcp__custom_tools__metadata_extractor__quick_metadata": 1
+  },
+  "subsessions": [],
+  "token_usage": {
+    "input_tokens": 7097,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 46592,
+    "output_tokens": 545,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    }
+  },
+  "cost_usd": 0.046357800000000005,
+  "final_status": "completed",
+  "error_count": 0
+}

@@ -2,8 +2,7 @@
 文件类型检测器工具 - 识别文件的真实类型和格式
 """
 
-from claude_agent_sdk import tool
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 import os
 import mimetypes
 import hashlib
@@ -54,53 +53,25 @@ FILE_SIGNATURES = {
     b'SQLite format 3': 'application/x-sqlite3',
 }
 
-@tool(
-    name="detect_file_type",
-    description="检测文件的真实类型，包括MIME类型、编码和格式信息",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "要检测的文件路径"
-            },
-            "deep_scan": {
-                "type": "boolean",
-                "description": "是否进行深度扫描（读取更多字节进行检测）",
-                "default": False
-            },
-            "calculate_hash": {
-                "type": "boolean",
-                "description": "是否计算文件哈希值",
-                "default": False
-            }
-        },
-        "required": ["file_path"]
-    }
-)
-async def detect_file_type(args: Dict[str, Any]) -> Dict[str, Any]:
+async def detect_file_type(file_path: str, deep_scan: bool = False, calculate_hash: bool = False) -> Dict[str, Any]:
     """
     检测文件类型和格式
 
     Args:
-        args: 包含文件路径和分析选项的字典
+        file_path: 要检测的文件路径
+        deep_scan: 是否进行深度扫描（读取更多字节进行检测）
+        calculate_hash: 是否计算文件哈希值
 
     Returns:
         文件类型检测结果
     """
-    file_path = args.get("file_path", "")
-    deep_scan = args.get("deep_scan", False)
-    calculate_hash = args.get("calculate_hash", False)
-
     try:
         # 检查文件是否存在
         if not os.path.exists(file_path):
             return {
-                "content": [{
-                    "type": "text",
-                    "text": f"❌ 错误: 文件不存在 {file_path}"
-                }],
-                "error": "file_not_found"
+                "success": False,
+                "error": "file_not_found",
+                "message": f"文件不存在: {file_path}"
             }
 
         # 获取文件基本信息
@@ -212,20 +183,62 @@ async def detect_file_type(args: Dict[str, Any]) -> Dict[str, Any]:
             ])
 
         return {
-            "content": [{
-                "type": "text",
-                "text": "\n".join(report_lines)
-            }],
-            "detection_result": detection_result
+            "success": True,
+            "detection_result": detection_result,
+            "report": "\n".join(report_lines)
         }
 
     except Exception as e:
         return {
-            "content": [{
-                "type": "text",
-                "text": f"❌ 检测失败: {str(e)}"
-            }],
-            "error": str(e)
+            "success": False,
+            "error": str(e),
+            "message": f"检测失败: {str(e)}"
+        }
+
+async def quick_file_info(file_path: str) -> Dict[str, Any]:
+    """
+    快速获取文件基本信息
+
+    Args:
+        file_path: 文件路径
+
+    Returns:
+        文件基本信息
+    """
+    try:
+        if not os.path.exists(file_path):
+            return {
+                "success": False,
+                "error": "file_not_found",
+                "message": f"文件不存在: {file_path}"
+            }
+
+        file_stat = os.stat(file_path)
+        file_path_obj = Path(file_path)
+
+        # 简单的类型检测
+        mime_type, _ = mimetypes.guess_type(file_path)
+
+        return {
+            "success": True,
+            "file_info": {
+                "path": file_path,
+                "name": file_path_obj.name,
+                "size": file_stat.st_size,
+                "size_formatted": format_file_size(file_stat.st_size),
+                "extension": file_path_obj.suffix.lower(),
+                "mime_type": mime_type,
+                "modified_time": file_stat.st_mtime,
+                "is_file": os.path.isfile(file_path),
+                "is_readable": os.access(file_path, os.R_OK)
+            }
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": f"获取文件信息失败: {str(e)}"
         }
 
 def is_binary_content(data: bytes) -> bool:

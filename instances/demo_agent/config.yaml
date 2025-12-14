@@ -50,18 +50,12 @@ tools:
     # 子实例工具（也注册在 custom_tools 服务器中）
     - "mcp__custom_tools__sub_claude_*"
 
-    # 外部 MCP 服务器工具（来自 .mcp.json）
-    - "mcp__external_database__*"
-    - "mcp__external_api__*"
-
 # ==================== 子实例配置 ====================
 #
 # 子实例是独立的 Agent 实例，可以有自己的配置、工具和会话记录
 sub_claude_instances:
   file_analyzer: "file_analyzer_agent"      # 文件分析子实例
   syntax_checker: "syntax_checker_agent"    # 语法检查子实例
-
-
 # ==================== 会话记录配置 ====================
 #
 # 会话记录系统：消息在内存中收集，会话结束时一次性写入磁盘
@@ -103,7 +97,6 @@ advanced:
   # 配置源优先级
   setting_sources:
     - "project"                    # 项目级配置优先
-    - "user"                       # 其次用户级配置
 
   # 环境变量（传递给子进程）
   env:

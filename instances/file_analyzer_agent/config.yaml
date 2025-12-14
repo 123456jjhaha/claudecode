@@ -3,32 +3,23 @@
 # 专业的文件分析助手，专注于文件类型检测、内容分析和元数据提取
 
 agent:
-  name: "file_analyzer"
+  name: "file_analyzer_agent"
   description: "文件分析专家，支持多种文件格式的深度分析"
 
-# 使用平衡的模型
 model: "claude-sonnet-4-5"
+system_prompt_file: ".claude/agent.md"  # 推荐使用 agent.md
 
-# 系统提示词文件
-system_prompt_file: ".claude/agent.md"
-
-# 工作目录
-cwd: "."
-
-# 工具权限配置
+# 工具权限（内置工具默认全部允许）
 tools:
-  # 禁用不必要的工具
+  # 禁止特定内置工具
   disallowed:
     - "WebFetch"
     - "WebSearch"
     - "KillShell"
-    - "Task"
-    - "Skill"
-    - "SlashCommand"
     - "Write"    # 文件分析器不应修改文件
     - "Edit"     # 文件分析器不应修改文件
 
-  # 允许的工具（只读分析）
+  # 允许 MCP 工具（自定义工具、外部 MCP、子实例）
   allowed:
     # 基础工具
     - "Read"
@@ -42,44 +33,25 @@ tools:
     - "mcp__custom_tools__content_analyzer__*"
     - "mcp__custom_tools__metadata_extractor__*"
 
+# 子实例配置（如果有的话）
+# sub_claude_instances:
+#   syntax_checker: "syntax_checker_agent"
+
 # 会话记录配置
 session_recording:
   enabled: true
-  retention_days: 45               # 文件分析记录保留时间较长
-  max_total_size_mb: 800           # 中等存储需求
+  retention_days: 30
+  max_total_size_mb: 1000
   auto_cleanup: true
-
-  # 记录所有消息
-  message_types:
-    - "UserMessage"
-    - "AssistantMessage"
-    - "ResultMessage"
-
-  # 性能配置
-  batch_size: 15
-  batch_timeout: 8.0
-  queue_size: 1500
-
-  # 内容控制
-  include_content: true
-  include_metadata: true
+  message_types: null  # null 表示记录所有类型（推荐）
 
 # 高级配置
 advanced:
-  permission_mode: "bypassPermissions"  # 改为这个，跳过权限检查
-  max_turns: 100                   # 文件分析通常需要多轮交互
-  setting_sources:
-    - "project"
-    - "user"
+  permission_mode: "bypassPermissions"
+  max_turns: 100
 
-  # 环境变量
+  # SDK 超时配置（避免子实例崩溃）
   env:
-    # PYTHONPATH: "."
-    # FILE_ANALYSIS_DEPTH: "deep"   # 深度分析模式
-    CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "3000000"  # 5分钟 - 避免SDK强制关闭流
-    MCP_TIMEOUT: "120000"                       # 2分钟 - MCP服务器启动超时
-    MCP_TOOL_TIMEOUT: "1800000"   
-  # 额外的目录访问权限
-  # add_dirs:
-  #   - "../data"                   # 允许访问数据目录
-  #   - "./logs"                    # 允许访问日志目录
+    CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "300000"  # 5分钟
+    MCP_TIMEOUT: "120000"                       # 2分钟
+    MCP_TOOL_TIMEOUT: "180000"                  # 3分钟

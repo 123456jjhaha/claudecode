@@ -2,50 +2,24 @@
 代码解析器工具 - 解析各种格式的代码文件
 """
 
-from claude_agent_sdk import tool
 from typing import Dict, Any, List
 import ast
 import json
 import yaml
 import re
 
-@tool(
-    name="parse_code",
-    description="解析代码文件，检查语法结构和基本错误",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "要解析的文件路径"
-            },
-            "language": {
-                "type": "string",
-                "description": "文件语言类型（可选，自动检测）"
-            },
-            "strict": {
-                "type": "boolean",
-                "description": "是否启用严格模式解析",
-                "default": False
-            }
-        },
-        "required": ["file_path"]
-    }
-)
-async def parse_code(args: Dict[str, Any]) -> Dict[str, Any]:
+async def parse_code(file_path: str, language: str = "", strict: bool = False) -> Dict[str, Any]:
     """
     解析代码文件并检查语法
 
     Args:
-        args: 包含文件路径、语言类型和严格模式标志的字典
+        file_path: 要解析的文件路径
+        language: 文件语言类型（可选，自动检测）
+        strict: 是否启用严格模式解析
 
     Returns:
         解析结果和错误信息
     """
-    file_path = args.get("file_path", "")
-    language = args.get("language", "")
-    strict = args.get("strict", False)
-
     # 自动检测语言类型
     if not language:
         language = detect_language(file_path)
@@ -84,68 +58,102 @@ async def parse_code(args: Dict[str, Any]) -> Dict[str, Any]:
             parse_result.update(result)
 
         # 生成报告
-        report_lines = [
-            f"## 代码解析报告",
-            f"**文件**: {file_path}",
-            f"**语言**: {language}",
-            f"**状态**: {'✅ 通过' if not parse_result['errors'] else '❌ 发现错误'}",
-            f"**统计**: {parse_result['lines']} 行, {parse_result['content_size']} 字符",
-            "",
-        ]
-
-        # 显示错误
-        if parse_result["errors"]:
-            report_lines.append("### ❌ 语法错误")
-            for error in parse_result["errors"][:10]:  # 限制显示数量
-                if isinstance(error, dict):
-                    report_lines.append(
-                        f"- **{error.get('type', 'Error')}**: {error.get('message', 'Unknown error')}\n"
-                        f"  位置: 第{error.get('line', '?')}行"
-                    )
-                else:
-                    report_lines.append(f"- {error}")
-
-        # 显示警告
-        if parse_result["warnings"]:
-            report_lines.append("\n### ⚠️ 警告")
-            for warning in parse_result["warnings"][:5]:
-                if isinstance(warning, dict):
-                    report_lines.append(f"- {warning.get('message', 'Warning')}")
-                else:
-                    report_lines.append(f"- {warning}")
-
-        # 显示结构信息
-        if parse_result.get("structure"):
-            report_lines.append("\n### 📊 代码结构")
-            for key, value in parse_result["structure"].items():
-                report_lines.append(f"- **{key}**: {value}")
-
-        if not parse_result["errors"] and not parse_result["warnings"]:
-            report_lines.append("\n✅ 代码结构良好，未发现语法问题。")
+        report = generate_parse_report(parse_result)
 
         return {
-            "content": [{
-                "type": "text",
-                "text": "\n".join(report_lines)
-            }],
-            "parse_result": parse_result
+            "success": True,
+            "parse_result": parse_result,
+            "report": report
         }
 
     except FileNotFoundError:
         return {
-            "content": [{
-                "type": "text",
-                "text": f"❌ 错误: 找不到文件 {file_path}"
-            }],
-            "error": "file_not_found"
+            "success": False,
+            "error": "file_not_found",
+            "message": f"找不到文件: {file_path}"
         }
     except Exception as e:
         return {
-            "content": [{
-                "type": "text",
-                "text": f"❌ 解析失败: {str(e)}"
-            }],
-            "error": str(e)
+            "success": False,
+            "error": str(e),
+            "message": f"解析失败: {str(e)}"
+        }
+
+async def quick_syntax_check(file_path: str) -> Dict[str, Any]:
+    """
+    快速语法检查
+
+    Args:
+        file_path: 要检查的文件路径
+
+    Returns:
+        快速检查结果
+    """
+    try:
+        # 自动检测语言类型
+        language = detect_language(file_path)
+
+        # 读取文件
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        result = {
+            "file_path": file_path,
+            "language": language,
+            "has_errors": False,
+            "has_warnings": False,
+            "error_count": 0,
+            "warning_count": 0,
+            "quick_issues": []
+        }
+
+        # 根据语言类型进行快速检查
+        if language == "python":
+            try:
+                ast.parse(content)
+            except SyntaxError as e:
+                result["has_errors"] = True
+                result["error_count"] = 1
+                result["quick_issues"].append({
+                    "type": "SyntaxError",
+                    "line": e.lineno,
+                    "message": e.msg
+                })
+
+        elif language == "json":
+            try:
+                json.loads(content)
+            except json.JSONDecodeError as e:
+                result["has_errors"] = True
+                result["error_count"] = 1
+                result["quick_issues"].append({
+                    "type": "JSONDecodeError",
+                    "line": e.lineno,
+                    "message": e.msg
+                })
+
+        elif language == "yaml":
+            try:
+                yaml.safe_load(content)
+            except yaml.YAMLError as e:
+                result["has_errors"] = True
+                result["error_count"] = 1
+                result["quick_issues"].append({
+                    "type": "YAMLError",
+                    "message": str(e)
+                })
+
+        return {
+            "success": True,
+            "result": result,
+            "summary": f"✅ 语法正确" if not result["has_errors"] else f"❌ 发现 {result['error_count']} 个错误"
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": f"快速语法检查失败: {str(e)}"
         }
 
 def detect_language(file_path: str) -> str:
@@ -393,3 +401,46 @@ def get_json_depth(obj, current_depth=0):
         return max(get_json_depth(item, current_depth + 1) for item in obj)
     else:
         return current_depth
+
+def generate_parse_report(parse_result: Dict[str, Any]) -> str:
+    """生成解析报告"""
+    report_lines = [
+        f"## 代码解析报告",
+        f"**文件**: {parse_result['file_path']}",
+        f"**语言**: {parse_result['language']}",
+        f"**状态**: {'✅ 通过' if not parse_result['errors'] else '❌ 发现错误'}",
+        f"**统计**: {parse_result['lines']} 行, {parse_result['content_size']} 字符",
+        "",
+    ]
+
+    # 显示错误
+    if parse_result["errors"]:
+        report_lines.append("### ❌ 语法错误")
+        for error in parse_result["errors"][:10]:  # 限制显示数量
+            if isinstance(error, dict):
+                report_lines.append(
+                    f"- **{error.get('type', 'Error')}**: {error.get('message', 'Unknown error')}\n"
+                    f"  位置: 第{error.get('line', '?')}行"
+                )
+            else:
+                report_lines.append(f"- {error}")
+
+    # 显示警告
+    if parse_result["warnings"]:
+        report_lines.append("\n### ⚠️ 警告")
+        for warning in parse_result["warnings"][:5]:
+            if isinstance(warning, dict):
+                report_lines.append(f"- {warning.get('message', 'Warning')}")
+            else:
+                report_lines.append(f"- {warning}")
+
+    # 显示结构信息
+    if parse_result.get("structure"):
+        report_lines.append("\n### 📊 代码结构")
+        for key, value in parse_result["structure"].items():
+            report_lines.append(f"- **{key}**: {value}")
+
+    if not parse_result["errors"] and not parse_result["warnings"]:
+        report_lines.append("\n✅ 代码结构良好，未发现语法问题。")
+
+    return "\n".join(report_lines)

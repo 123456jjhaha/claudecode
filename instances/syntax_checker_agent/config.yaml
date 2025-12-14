@@ -3,32 +3,23 @@
 # 专注于语法分析、错误检测和代码解析的轻量级助手
 
 agent:
-  name: "syntax_checker"
+  name: "syntax_checker_agent"
   description: "语法检查专家，专注于代码语法分析和错误检测"
 
-# 使用快速模型进行语法检查
 model: "claude-sonnet-4-5"
+system_prompt_file: ".claude/agent.md"  # 推荐使用 agent.md
 
-# 系统提示词文件
-system_prompt_file: ".claude/agent.md"
-
-# 工作目录
-cwd: "."
-
-# 工具权限配置
+# 工具权限（内置工具默认全部允许）
 tools:
-  # 禁用不必要的工具
+  # 禁止特定内置工具
   disallowed:
     - "WebFetch"
     - "WebSearch"
     - "KillShell"
-    - "Task"
-    - "Skill"
-    - "SlashCommand"
     - "Write"  # 语法检查器不应该修改文件
     - "Edit"   # 语法检查器不应该修改文件
 
-  # 允许的工具（只读）
+  # 允许 MCP 工具（自定义工具、外部 MCP、子实例）
   allowed:
     # 基础工具
     - "Read"
@@ -42,38 +33,25 @@ tools:
     - "mcp__custom_tools__parser__*"
     - "mcp__custom_tools__validator__*"
 
+# 子实例配置（如果有的话）
+# sub_claude_instances:
+#   file_analyzer: "file_analyzer_agent"
+
 # 会话记录配置
 session_recording:
   enabled: true
-  retention_days: 30               # 语法检查记录保留时间适中
-  max_total_size_mb: 200           # 较小的存储需求
+  retention_days: 30
+  max_total_size_mb: 500
   auto_cleanup: true
-
-  # 记录关键消息
-  message_types:
-    - "UserMessage"
-    - "ResultMessage"     # 主要记录结果
-    # - "AssistantMessage"  # 减少消息量
-
-  # 性能优化
-  batch_size: 50                  # 批量处理更多消息
-  batch_timeout: 15.0             # 更长的超时
-  queue_size: 3000                # 更大的队列
-
-  # 内容控制
-  include_content: true
-  include_metadata: true
+  message_types: null  # null 表示记录所有类型（推荐）
 
 # 高级配置
 advanced:
-  permission_mode: "bypassPermissions"  # 改为这个，跳过权限检查
-  max_turns: 50                   # 语法检查通常很快
-  setting_sources:
-    - "project"
-    - "user"
+  permission_mode: "bypassPermissions"
+  max_turns: 50  # 语法检查通常很快
 
-  # 环境变量
+  # SDK 超时配置（避免子实例崩溃）
   env:
-    CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "3000000"  # 5分钟 - 避免SDK强制关闭流
-    MCP_TIMEOUT: "120000"                       # 2分钟 - MCP服务器启动超时
-    MCP_TOOL_TIMEOUT: "1800000"   
+    CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "300000"  # 5分钟
+    MCP_TIMEOUT: "120000"                       # 2分钟
+    MCP_TOOL_TIMEOUT: "180000"                  # 3分钟   

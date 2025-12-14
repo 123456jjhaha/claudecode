@@ -2,66 +2,33 @@
 元数据提取器工具 - 从文件中提取元数据和属性信息
 """
 
-from claude_agent_sdk import tool
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 import os
 import json
 import time
 from datetime import datetime
+from pathlib import Path
 import re
 
-@tool(
-    name="extract_metadata",
-    description="提取文件的元数据，包括文件系统信息、内容元数据和特定格式属性",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "要提取元数据的文件路径"
-            },
-            "extract_exif": {
-                "type": "boolean",
-                "description": "是否提取图像EXIF数据（如果适用）",
-                "default": False
-            },
-            "extract_document_props": {
-                "type": "boolean",
-                "description": "是否提取文档属性（如果适用）",
-                "default": True
-            },
-            "include_file_hash": {
-                "type": "boolean",
-                "description": "是否计算文件哈希值",
-                "default": False
-            }
-        },
-        "required": ["file_path"]
-    }
-)
-async def extract_metadata(args: Dict[str, Any]) -> Dict[str, Any]:
+async def extract_metadata(file_path: str, extract_exif: bool = False, extract_document_props: bool = True, include_file_hash: bool = False) -> Dict[str, Any]:
     """
     提取文件元数据
 
     Args:
-        args: 包含文件路径和提取选项的字典
+        file_path: 要提取元数据的文件路径
+        extract_exif: 是否提取图像EXIF数据（如果适用）
+        extract_document_props: 是否提取文档属性（如果适用）
+        include_file_hash: 是否计算文件哈希值
 
     Returns:
         提取的元数据
     """
-    file_path = args.get("file_path", "")
-    extract_exif = args.get("extract_exif", False)
-    extract_document_props = args.get("extract_document_props", True)
-    include_file_hash = args.get("include_file_hash", False)
-
     try:
         if not os.path.exists(file_path):
             return {
-                "content": [{
-                    "type": "text",
-                    "text": f"❌ 错误: 文件不存在 {file_path}"
-                }],
-                "error": "file_not_found"
+                "success": False,
+                "error": "file_not_found",
+                "message": f"文件不存在: {file_path}"
             }
 
         # 初始化元数据结构
@@ -97,20 +64,75 @@ async def extract_metadata(args: Dict[str, Any]) -> Dict[str, Any]:
         report = generate_metadata_report(metadata)
 
         return {
-            "content": [{
-                "type": "text",
-                "text": report
-            }],
-            "metadata": metadata
+            "success": True,
+            "metadata": metadata,
+            "report": report
         }
 
     except Exception as e:
         return {
-            "content": [{
-                "type": "text",
-                "text": f"❌ 元数据提取失败: {str(e)}"
-            }],
-            "error": str(e)
+            "success": False,
+            "error": str(e),
+            "message": f"元数据提取失败: {str(e)}"
+        }
+
+async def quick_metadata(file_path: str) -> Dict[str, Any]:
+    """
+    快速获取基础元数据
+
+    Args:
+        file_path: 文件路径
+
+    Returns:
+        基础元数据
+    """
+    try:
+        if not os.path.exists(file_path):
+            return {
+                "success": False,
+                "error": "file_not_found",
+                "message": f"文件不存在: {file_path}"
+            }
+
+        # 只提取基础信息
+        stat = os.stat(file_path)
+        file_path_obj = Path(file_path)
+
+        # MIME类型检测
+        import mimetypes
+        mime_type, _ = mimetypes.guess_type(file_path)
+
+        # 简单的内容检测
+        is_text = False
+        encoding = None
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                f.read(100)  # 尝试读取前100字符
+                is_text = True
+                encoding = 'utf-8'
+        except:
+            pass
+
+        return {
+            "success": True,
+            "file_path": file_path,
+            "basic_info": {
+                "name": file_path_obj.name,
+                "size": stat.st_size,
+                "size_formatted": format_file_size(stat.st_size),
+                "extension": file_path_obj.suffix.lower(),
+                "mime_type": mime_type,
+                "modified": format_timestamp(stat.st_mtime),
+                "is_text": is_text,
+                "encoding": encoding
+            }
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": f"获取基础元数据失败: {str(e)}"
         }
 
 def extract_filesystem_metadata(file_path: str) -> Dict[str, Any]:
