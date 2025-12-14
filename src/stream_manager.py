@@ -24,18 +24,68 @@ class QueryStreamManager:
     解决异步生成器生命周期管理的关键问题。
     """
 
-    def __init__(self, session: Optional[Any], options: Any):
+    def __init__(
+        self,
+        stream: Any,
+        session_manager: Optional[Any] = None,
+        record_session: bool = True,
+        prompt: Optional[str] = None,
+        resume_session_id: Optional[str] = None
+    ):
         """
         初始化流管理器
 
         Args:
-            session: Session 对象（如果启用了会话记录）
-            options: ClaudeAgentOptions 对象
+            stream: SDK 返回的查询流
+            session_manager: SessionManager 对象
+            record_session: 是否记录会话
+            prompt: 查询提示词（用于创建新会话）
+            resume_session_id: 要恢复的会话 ID
         """
-        self.session = session
-        self.options = options
+        self.stream = stream
+        self.session_manager = session_manager
+        self.record_session = record_session
+        self.prompt = prompt
+        self.resume_session_id = resume_session_id
+        self.session = None  # 实际的 Session 对象
         self._finalized = False  # 防止双重 finalize
         self._context_token: Optional[Token] = None  # 保存上下文令牌
+        self._initialized = False  # 标记是否已初始化
+
+    async def initialize(self) -> None:
+        """
+        初始化 session（创建新会话或恢复已有会话）
+
+        必须在开始迭代之前调用此方法
+        """
+        if self._initialized:
+            return
+
+        if not self.record_session or not self.session_manager:
+            # 不记录会话
+            self._initialized = True
+            return
+
+        try:
+            if self.resume_session_id:
+                # Resume 模式：恢复已有会话
+                self.session = self.session_manager.get_session(self.resume_session_id)
+                logger.info(f"[StreamManager] Resume session: {self.resume_session_id}")
+            else:
+                # 创建新会话
+                self.session = await self.session_manager.create_session(
+                    initial_prompt=self.prompt or "",
+                    context={}
+                )
+                logger.info(f"[StreamManager] Created new session: {self.session.session_id}")
+
+            self._initialized = True
+
+        except Exception as e:
+            logger.error(f"[StreamManager] Failed to initialize session: {e}", exc_info=True)
+            # 继续执行，但不记录会话
+            self.session = None
+            self._initialized = True
 
     async def __aenter__(self):
         """
@@ -150,3 +200,41 @@ class QueryStreamManager:
     def is_finalized(self) -> bool:
         """检查是否已经 finalize"""
         return self._finalized
+
+    @property
+    def session_id(self) -> Optional[str]:
+        """获取会话 ID"""
+        return self.session.session_id if self.session else None
+
+    def __aiter__(self):
+        """使 QueryStreamManager 可作为异步迭代器"""
+        return self
+
+    async def __anext__(self):
+        """异步迭代器的下一个方法"""
+        # 确保 session 已初始化（第一次迭代时）
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            # 从 SDK stream 获取下一个消息
+            message = await self.stream.__anext__()
+
+            # 记录消息
+            if self.session:
+                await self.session.record_message(message)
+
+                # 如果是 ResultMessage，执行 finalize
+                from claude_agent_sdk import ResultMessage
+                if isinstance(message, ResultMessage):
+                    await self.finalize_on_result(message)
+
+            return message
+
+        except StopAsyncIteration:
+            # 流结束，执行 finalize
+            if self.session and not self._finalized:
+                self.session.metadata['status'] = 'completed'
+                await self.session.finalize()
+                self._finalized = True
+            raise

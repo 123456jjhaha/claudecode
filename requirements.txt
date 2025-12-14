@@ -1,6 +1,9 @@
 # Claude Agent SDK
 claude-agent-sdk
 
+# MCP (Model Context Protocol) - 标准实现
+mcp>=1.0.0
+
 # 配置解析
 pyyaml>=6.0
 

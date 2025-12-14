@@ -5,7 +5,7 @@ Agent 系统主类
 """
 
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional, List, Dict
 from functools import wraps
 from datetime import datetime
 from dataclasses import dataclass
@@ -13,11 +13,12 @@ from claude_agent_sdk import query, ClaudeAgentOptions, SystemMessage, UserMessa
 
 from .config_loader import AgentConfigLoader
 from .tool_manager import ToolManager
-from .instance_manager import InstanceManager
 from .mcp_config_loader import load_mcp_config, merge_mcp_configs
+from .sub_instance_adapter import create_sub_instance_tools
 from .error_handling import AgentSystemError
 from .logging_config import get_logger
 from .stream_manager import QueryStreamManager
+from .session_manager import SessionManager
 
 logger = get_logger(__name__)
 
@@ -102,10 +103,10 @@ class AgentSystem:
         # 组件
         self.config_loader: AgentConfigLoader | None = None
         self.tool_manager: ToolManager | None = None
-        self.instance_manager: InstanceManager | None = None
+        self.sub_instance_tools: list = None
 
-        # 会话管理（新增）
-        self.session_manager: Any | None = None  # SessionManager
+        # 会话管理
+        self.session_manager: SessionManager | None = None
 
         # 配置和选项
         self._config: dict | None = None
@@ -134,59 +135,54 @@ class AgentSystem:
             self._config = self.config_loader.load()
             options_dict = self.config_loader.get_claude_options_dict()
 
-            # 2. 加载工具
-            logger.info("加载工具...")
+            # 2. 发现本地工具（只发现，用于统计）
+            logger.info("发现本地工具...")
             self.tool_manager = ToolManager(self.instance_path)
             self.tool_manager.discover_tools()
 
-            # 创建本地工具 MCP 服务器
-            custom_tools_server = self.tool_manager.create_mcp_server()
-
-            # 3. 加载子实例
-            logger.info("加载子实例...")
+            # 3. 发现子实例（只发现，用于统计）
+            logger.info("发现子实例...")
             sub_instances_config = options_dict.get("_sub_instances_config", {})
 
             # 保存会话记录配置（需要在创建 options 前提取）
             session_recording_config = options_dict.get("_session_recording_config", {})
 
+            # 创建子实例工具（只用于统计数量）
             if sub_instances_config:
-                self.instance_manager = InstanceManager(
-                    instances_config=sub_instances_config,
-                    instances_root=self.instances_root
+                logger.info(f"发现 {len(sub_instances_config)} 个子实例配置")
+                self.sub_instance_tools = create_sub_instance_tools(
+                    sub_instances_config,
+                    self.instances_root
                 )
-                self.instance_manager.load_instances()
-
-                # 创建子实例 MCP 服务器
-                sub_instances_server = self.instance_manager.create_mcp_server()
             else:
-                sub_instances_server = None
+                self.sub_instance_tools = []
 
-            # 4. 加载和合并 MCP 服务器配置
-            logger.info("配置 MCP 服务器...")
+            # 4. 启动 MCP 服务器（传递 instance_path，服务器自己负责加载所有工具）
+            logger.info("启动 MCP 服务器...")
+            custom_tools_server = None
+            if self.tool_manager.tools_count > 0 or sub_instances_config:
+                custom_tools_server = self.tool_manager.start_mcp_server("custom_tools")
 
-            # 4.1 读取 .mcp.json 文件中的外部 MCP 服务器配置
+            # 6. 加载和合并 MCP 服务器配置
+            logger.info("合并 MCP 服务器配置...")
+
+            # 6.1 读取 .mcp.json 文件中的外部 MCP 服务器配置
             external_mcp_servers = load_mcp_config(self.instance_path)
 
-            # 4.2 准备 SDK 服务器配置（本地工具和子实例）
-            sdk_mcp_servers = {}
+            # 6.2 准备内部 MCP 服务器配置
+            internal_mcp_servers = {}
             if custom_tools_server is not None:
-                sdk_mcp_servers["custom_tools"] = custom_tools_server
-            if sub_instances_server is not None:
-                sdk_mcp_servers["sub_instances"] = sub_instances_server
+                internal_mcp_servers["custom_tools"] = custom_tools_server
 
-            # 4.3 合并所有 MCP 服务器配置
-            # 注意：SDK 服务器优先级更高，防止被 .mcp.json 中的同名配置覆盖
-            all_mcp_servers = merge_mcp_configs(sdk_mcp_servers, external_mcp_servers)
+            # 6.3 合并所有 MCP 服务器配置
+            all_mcp_servers = merge_mcp_configs(internal_mcp_servers, external_mcp_servers)
 
-            # 5. 展开工具权限配置中的通配符
+            # 7. 展开工具权限配置中的通配符
             logger.info("处理工具权限配置...")
-            all_mcp_tool_names = self._collect_all_mcp_tool_names(
-                custom_tools_server,
-                sub_instances_server
-            )
+            all_mcp_tool_names = self._collect_all_mcp_tool_names(custom_tools_server)
             self._expand_tool_permissions(options_dict, all_mcp_tool_names)
 
-            # 6. 生成最终的 ClaudeAgentOptions
+            # 8. 生成最终的 ClaudeAgentOptions
             logger.info("生成 ClaudeAgentOptions...")
 
             # 移除内部使用的自定义字段
@@ -197,42 +193,35 @@ class AgentSystem:
             if all_mcp_servers:
                 options_dict["mcp_servers"] = all_mcp_servers
                 logger.info(f"配置了 {len(all_mcp_servers)} 个 MCP 服务器")
-            else:
-                logger.info("未配置 MCP 服务器")
 
-            self._options = ClaudeAgentOptions(**options_dict)
-
-            # 7. 初始化会话管理器
-            logger.info("初始化会话管理器...")
-            from .session_manager import SessionManager
-            from .session_context import get_current_session
-
-            parent_session = get_current_session()
+            # 9. 创建会话管理器
+            logger.info("初始化会话记录...")
             self.session_manager = SessionManager(
                 instance_path=self.instance_path,
-                parent_session=parent_session,
                 config=session_recording_config
             )
+
+            # 10. 创建 ClaudeAgentOptions
+            self._options = ClaudeAgentOptions(**options_dict)
 
             self._initialized = True
             logger.info("系统初始化完成")
 
         except Exception as e:
-            if isinstance(e, AgentSystemError):
-                raise
+            logger.error(f"初始化失败: {e}")
             raise AgentSystemError(f"初始化失败: {e}")
 
     def _collect_all_mcp_tool_names(
         self,
         custom_tools_server: Any,
-        sub_instances_server: Any
-    ) -> list[str]:
+        sub_instances_server: Any = None
+    ) -> List[str]:
         """
         收集所有 MCP 工具的完整名称
 
         Args:
-            custom_tools_server: 本地工具 MCP 服务器
-            sub_instances_server: 子实例 MCP 服务器
+            custom_tools_server: 本地工具 MCP 服务器配置
+            sub_instances_server: 子实例 MCP 服务器配置（已弃用）
 
         Returns:
             所有 MCP 工具名称列表
@@ -240,24 +229,19 @@ class AgentSystem:
         all_tool_names = []
 
         # 1. 收集本地自定义工具
-        if custom_tools_server is not None and self.tool_manager:
+        if self.tool_manager:
             local_tool_names = self.tool_manager.get_tool_names()
             for tool_name in local_tool_names:
                 full_name = f"mcp__custom_tools__{tool_name}"
                 all_tool_names.append(full_name)
             logger.debug(f"收集到 {len(local_tool_names)} 个本地工具")
 
-        # 2. 收集子实例工具
-        if sub_instances_server is not None and self.instance_manager:
-            sub_tool_names = self.instance_manager.get_tool_names()
-            for tool_name in sub_tool_names:
-                full_name = f"mcp__sub_instances__{tool_name}"
+        # 2. 收集子实例工具（现在是主 MCP 服务器的一部分）
+        if self.sub_instance_tools:
+            for tool in self.sub_instance_tools:
+                full_name = f"mcp__custom_tools__{tool.name}"
                 all_tool_names.append(full_name)
-            logger.debug(f"收集到 {len(sub_tool_names)} 个子实例工具")
-
-        # TODO: 3. 收集外部 MCP 服务器的工具（如果需要的话）
-        # 外部 MCP 服务器的工具名需要在运行时从服务器获取，
-        # 这里暂时不处理，可以在后续版本中添加
+            logger.debug(f"收集到 {len(self.sub_instance_tools)} 个子实例工具")
 
         logger.info(f"总共收集到 {len(all_tool_names)} 个 MCP 工具")
         return all_tool_names
@@ -294,7 +278,7 @@ class AgentSystem:
             options_dict["allowed_tools"] = expanded_allowed
             logger.info(f"展开后的 allowed_tools 包含 {len(expanded_allowed)} 个工具")
 
-        # 展开 disallowed_tools（如果需要的话）
+        # 展开 disallowed_tools
         if "disallowed_tools" in options_dict:
             disallowed_patterns = options_dict["disallowed_tools"]
             expanded_disallowed = []
@@ -327,120 +311,54 @@ class AgentSystem:
             resume_session_id: 要恢复的会话 ID（我们的本地 session_id）
 
         Returns:
-            QueryStream 对象（可迭代，包含 session_id 属性）
-
-        Raises:
-            AgentSystemError: 查询失败
+            QueryStream 对象（可迭代，包含 session_id）
         """
-        if not self._initialized:
-            await self.initialize()
+        require_initialized(self)
 
         logger.info(f"执行查询... (record_session={record_session}, resume={resume_session_id})")
-        logger.debug(f"提示词: {prompt}")
 
-        # 创建或加载 session
-        session = None
+        try:
+            # 准备查询选项
+            query_options = self._options
+            if not record_session:
+                # 禁用会话记录
+                query_options = query_options.with_record_session(False)
 
-        if resume_session_id:
-            # === Resume 模式 ===
-            # 1. 加载之前的会话
-            session = self.session_manager.get_session(resume_session_id)
-            logger.info(f"恢复会话: {resume_session_id}")
-            session_id = resume_session_id
+            # 如果有 resume_session_id，需要恢复会话
+            if resume_session_id:
+                query_options = query_options.with_resume(resume_session_id)
 
-            # 2. 获取 Claude SDK 的 session_id
-            claude_session_id = session.metadata.get('claude_session_id')
-            if not claude_session_id:
-                raise AgentSystemError(f"会话 {resume_session_id} 没有 Claude session_id，无法 resume")
-
-            # 3. 基于当前 options 添加 resume 参数（无需重新读取配置）
-            logger.info(f"使用 Claude session_id: {claude_session_id}")
-
-            # 将当前 options 转换为 dict，添加 resume 字段
-            options_dict = self._options.__dict__.copy()
-            options_dict['resume'] = claude_session_id
-
-            # 重新生成 options（包含 resume 参数）
-            query_options = ClaudeAgentOptions(**options_dict)
-
-            # 4. 重置会话状态（准备追加）
-            session.metadata['status'] = 'running'
-            session.metadata['resumed_at'] = datetime.now().isoformat()
-            session._finalized = False
-
-            # 5. 追加新的提示词到 prompts 数组
-            if 'prompts' not in session.metadata:
-                session.metadata['prompts'] = []
-            session.metadata['prompts'].append({
-                "prompt": prompt[:1000],  # 限制长度
-                "timestamp": datetime.now().isoformat()
-            })
-
-            # 注意：不需要手动调用 set_current_session()
-            # QueryStreamManager 会在 __aenter__ 时自动设置上下文
-
-        elif record_session and self.session_manager:
-            # === 新会话模式 ===
-            session = await self.session_manager.create_session(
-                initial_prompt=prompt,
-                context=None
+            # 执行查询
+            stream = query(
+                prompt=prompt,
+                options=query_options
             )
-            session_id = session.session_id
-            query_options = self._options
 
-        else:
-            # 不记录会话
-            session_id = None
-            query_options = self._options
+            # 创建查询流管理器
+            stream_manager = QueryStreamManager(
+                stream=stream,
+                session_manager=self.session_manager,
+                record_session=record_session,
+                prompt=prompt,
+                resume_session_id=resume_session_id
+            )
 
-        # 创建内部异步生成器（使用 QueryStreamManager 管理生命周期）
-        async def _query_generator():
-            # 使用 StreamManager 确保资源正确管理
-            async with QueryStreamManager(session, query_options) as stream_mgr:
-                # 记录用户消息（在调用 query 之前）
-                if session:
-                    # 创建 UserMessage 对象用于记录
-                    from claude_agent_sdk import TextBlock
-                    user_msg = UserMessage([TextBlock(text=prompt)])
-                    await session.record_message(user_msg)
+            # 初始化 session（创建或恢复会话）
+            await stream_manager.initialize()
 
-                # 修复：使用异步生成器提示词而不是字符串提示词
-                # 这是为了解决 Claude Agent SDK 的一个已知 bug (Issue #266, #386)
-                # 当使用 SDK MCP 服务器时，字符串提示词会导致 ProcessTransport 错误
-                # async def prompt_generator():
-                #     yield {"type": "user", "message": {"role": "user", "content": prompt}}
+            # 创建 QueryStream 包装器
+            query_stream = QueryStream(
+                iterator=stream_manager,
+                session_id=stream_manager.session_id
+            )
 
-                # 执行查询并记录消息
-                async for message in query(prompt=prompt, options=query_options):
-                    # 在第一条 SystemMessage 中获取 Claude session_id
-                    if isinstance(message, SystemMessage) and message.subtype == 'init':
-                        if session and 'claude_session_id' not in session.metadata:
-                            claude_session_id = message.data.get('session_id')
-                            if claude_session_id:
-                                session.metadata['claude_session_id'] = claude_session_id
-                                logger.info(f"获取 Claude session_id: {claude_session_id}")
-                                # 立即保存元数据
-                                import json
-                                metadata_file = session.session_dir / "metadata.json"
-                                with open(metadata_file, 'w', encoding='utf-8') as f:
-                                    json.dump(session.metadata, f, indent=2, ensure_ascii=False)
+            return query_stream
 
-                    # 记录消息到内存
-                    if session:
-                        await session.record_message(message)
+        except Exception as e:
+            logger.error(f"查询失败: {e}")
+            raise AgentSystemError(f"查询失败: {e}")
 
-                    # 返回消息（流式）
-                    yield message
-
-                    # 检查是否是 ResultMessage（会话结束）
-                    message_type = type(message).__name__
-                    if message_type == "ResultMessage":
-                        # 使用 StreamManager 的幂等 finalize
-                        await stream_mgr.finalize_on_result(message)
-
-        # 返回 QueryStream 对象
-        return QueryStream(_query_generator(), session_id)
-
+    @require_initialized
     async def query_text(
         self,
         prompt: str,
@@ -448,51 +366,123 @@ class AgentSystem:
         resume_session_id: Optional[str] = None
     ) -> QueryResult:
         """
-        执行查询并返回最终文本结果（支持会话记录和 resume）
-
-        只返回 ResultMessage 中的 result 文本，不返回过程中的 AssistantMessage 文本。
-        适用于子实例调用，只需要最终结果而不需要查看执行过程。
+        执行查询并返回结果
 
         Args:
             prompt: 查询提示词
-            record_session: 是否记录会话
-            resume_session_id: 要恢复的会话 ID（我们的本地 session_id）
+            record_session: 是否记录会话到文件
+            resume_session_id: 要恢复的会话 ID
 
         Returns:
-            QueryResult 对象（包含 result 和 session_id）
-
-        Raises:
-            AgentSystemError: 查询失败
+            QueryResult 对象（包含结果和 session_id）
         """
-        result_text = ""
-
         stream = await self.query(
-            prompt,
+            prompt=prompt,
             record_session=record_session,
             resume_session_id=resume_session_id
         )
 
+        # 收集所有消息，构建结果
+        result_parts = []
         async for message in stream:
-            # 只获取 ResultMessage 的 result
+            # 处理消息内容
             message_type = type(message).__name__
 
             if message_type == "ResultMessage":
-                if hasattr(message, 'result') and message.result:
-                   result_text = message.result
+                # 最终结果
+                result_parts.append(message.result if hasattr(message, "result") else str(message))
+            elif hasattr(message, "text"):
+                # 文本消息
+                result_parts.append(message.text)
+            elif hasattr(message, "content"):
+                # 内容块
+                if isinstance(message.content, list):
+                    for block in message.content:
+                        if hasattr(block, "text"):
+                            result_parts.append(block.text)
 
-        return QueryResult(result=result_text, session_id=stream.session_id)
+        # 组合结果
+        result_text = "\n".join(result_parts) if result_parts else ""
 
-    @property
+        return QueryResult(
+            result=result_text,
+            session_id=stream.session_id
+        )
+
     @require_initialized
-    def config(self) -> dict:
-        """获取配置"""
-        return self._config
+    def get_session_details(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取会话详情
 
-    @property
+        Args:
+            session_id: 会话 ID
+
+        Returns:
+            会话详情字典，如果不存在则返回 None
+        """
+        if self.session_manager is None:
+            return None
+
+        from .session_query import get_session_details
+        return get_session_details(
+            instance_name=self.agent_name,
+            session_id=session_id
+        )
+
     @require_initialized
-    def options(self) -> ClaudeAgentOptions:
-        """获取 ClaudeAgentOptions"""
-        return self._options
+    def list_sessions(
+        self,
+        limit: int = 100,
+        status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        列出会话
+
+        Args:
+            limit: 返回数量限制
+            status: 状态过滤（running/completed/error）
+
+        Returns:
+            会话列表
+        """
+        if self.session_manager is None:
+            return []
+
+        from .session_query import list_sessions
+        return list_sessions(
+            instance_name=self.agent_name,
+            limit=limit,
+            status=status
+        )
+
+    @require_initialized
+    def search_sessions(
+        self,
+        query: str,
+        field: str = "initial_prompt",
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        搜索会话
+
+        Args:
+            query: 搜索关键词
+            field: 搜索字段
+            limit: 返回数量限制
+
+        Returns:
+            匹配的会话列表
+        """
+        if self.session_manager is None:
+            return []
+
+        from .session_query import search_sessions
+        return search_sessions(
+            instance_name=self.agent_name,
+            query=query,
+            field=field,
+            limit=limit
+        )
 
     @property
     @require_initialized
@@ -514,11 +504,60 @@ class AgentSystem:
         return self.tool_manager.tools_count
 
     @property
-    def instances_count(self) -> int:
+    def sub_instances_count(self) -> int:
         """获取子实例数量"""
-        if self.instance_manager is None:
+        if self.sub_instance_tools is None:
             return 0
-        return self.instance_manager.instance_count
+        return len(self.sub_instance_tools)
+
+    @property
+    def session_id(self) -> Optional[str]:
+        """
+        获取当前会话 ID（仅向后兼容）
+
+        注意：AgentSystem 现在是无状态的，每个查询都有独立的 session_id。
+        请从 QueryResult 或 QueryStream 中获取 session_id。
+        """
+        logger.warning(
+            "AgentSystem.session_id 已过时。系统现在是无状态的，"
+            "请从 QueryResult 或 QueryStream 中获取 session_id。"
+        )
+        return None
+
+    def cleanup(self):
+        """
+        清理资源，停止 MCP 服务器进程
+
+        应该在应用程序关闭时调用
+        """
+        if not self._initialized:
+            return
+
+        logger.info("清理 AgentSystem 资源...")
+
+        # 停止工具 MCP 服务器
+        if self.tool_manager is not None:
+            try:
+                self.tool_manager.stop_mcp_server()
+            except Exception as e:
+                logger.error(f"停止工具 MCP 服务器失败: {e}")
+
+        # 停止会话管理器
+        if self.session_manager is not None:
+            try:
+                self.session_manager.cleanup()
+            except Exception as e:
+                logger.error(f"清理会话管理器失败: {e}")
+
+        logger.info("AgentSystem 资源清理完成")
+
+    def __del__(self):
+        """析构函数，确保资源被清理"""
+        try:
+            self.cleanup()
+        except Exception:
+            # 防止析构函数中的异常
+            pass
 
     def __repr__(self) -> str:
         """字符串表示"""
@@ -526,7 +565,7 @@ class AgentSystem:
             return (
                 f"AgentSystem(name='{self.agent_name}', "
                 f"tools={self.tools_count}, "
-                f"instances={self.instances_count})"
+                f"sub_instances={self.sub_instances_count})"
             )
         else:
             return f"AgentSystem(path='{self.instance_path}', initialized=False)"

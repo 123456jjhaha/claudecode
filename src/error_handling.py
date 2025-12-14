@@ -47,35 +47,6 @@ class ToolLoadError(ToolError):
     pass
 
 
-class InstanceError(AgentSystemError):
-    """实例相关错误"""
-    def __init__(self, message: str, instance_name: str | None = None):
-        self.instance_name = instance_name
-        if instance_name:
-            message = f"实例错误 ({instance_name}): {message}"
-        super().__init__(message)
-
-
-class InstanceNotFoundError(InstanceError):
-    """实例未找到错误"""
-    pass
-
-
-class InstanceExecutionError(InstanceError):
-    """实例执行错误"""
-    def __init__(self, message: str, instance_name: str | None = None, cause: Exception | None = None):
-        super().__init__(message, instance_name)
-        self.cause = cause
-        self.__cause__ = cause
-
-
-class PathResolutionError(AgentSystemError):
-    """路径解析错误"""
-    def __init__(self, message: str, path: str | None = None):
-        self.path = path
-        if path:
-            message = f"路径解析错误 ({path}): {message}"
-        super().__init__(message)
 
 
 class MCPServerError(AgentSystemError):

@@ -45,9 +45,10 @@ tools:
   allowed:
     # 自定义工具（来自 tools/ 目录）
     - "mcp__custom_tools__calculator__*"
-    # 子实例工具
-    - "mcp__sub_instances__sub_claude_*"
+    - "mcp__custom_tools__file_analyzer__*"
 
+    # 子实例工具（也注册在 custom_tools 服务器中）
+    - "mcp__custom_tools__sub_claude_*"
 
     # 外部 MCP 服务器工具（来自 .mcp.json）
     - "mcp__external_database__*"
@@ -56,9 +57,9 @@ tools:
 # ==================== 子实例配置 ====================
 #
 # 子实例是独立的 Agent 实例，可以有自己的配置、工具和会话记录
-# sub_claude_instances:
-#   file_analyzer: "file_analyzer_agent"      # 文件分析子实例
-#   syntax_checker: "syntax_checker_agent"  # 语法检查子实例
+sub_claude_instances:
+  file_analyzer: "file_analyzer_agent"      # 文件分析子实例
+  syntax_checker: "syntax_checker_agent"    # 语法检查子实例
 
 
 # ==================== 会话记录配置 ====================

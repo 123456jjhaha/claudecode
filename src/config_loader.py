@@ -12,7 +12,7 @@ from typing import Any
 from functools import wraps
 from dotenv import load_dotenv
 
-from .error_handling import ConfigError, PathResolutionError
+from .error_handling import ConfigError
 from .config_validator import ConfigValidator
 from .logging_config import get_logger
 
@@ -101,10 +101,10 @@ class AgentConfigLoader:
             解析后的绝对路径
 
         Raises:
-            PathResolutionError: 路径解析失败
+            ConfigError: 路径解析失败
         """
         if not path:
-            raise PathResolutionError("路径为空")
+            raise ConfigError("路径为空")
 
         # 展开用户目录符号 ~
         path = os.path.expanduser(path)

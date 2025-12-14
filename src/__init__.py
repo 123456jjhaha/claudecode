@@ -12,7 +12,7 @@ from .agent_system import AgentSystem, QueryResult, QueryStream
 # 导出核心组件
 from .config_loader import AgentConfigLoader
 from .tool_manager import ToolManager
-from .instance_manager import InstanceManager
+from .sub_instance_adapter import SubInstanceTool, create_sub_instance_tools
 from .mcp_config_loader import load_mcp_config, merge_mcp_configs
 
 # 导出错误类
@@ -23,10 +23,6 @@ from .error_handling import (
     ToolError,
     ToolDiscoveryError,
     ToolLoadError,
-    InstanceError,
-    InstanceNotFoundError,
-    InstanceExecutionError,
-    PathResolutionError,
     MCPServerError,
 )
 
@@ -43,7 +39,8 @@ __all__ = [
     # 核心组件
     "AgentConfigLoader",
     "ToolManager",
-    "InstanceManager",
+    "SubInstanceTool",
+    "create_sub_instance_tools",
     "load_mcp_config",
     "merge_mcp_configs",
     # 错误类
@@ -53,10 +50,6 @@ __all__ = [
     "ToolError",
     "ToolDiscoveryError",
     "ToolLoadError",
-    "InstanceError",
-    "InstanceNotFoundError",
-    "InstanceExecutionError",
-    "PathResolutionError",
     "MCPServerError",
     # 日志
     "setup_logger",

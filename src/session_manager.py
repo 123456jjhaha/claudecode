@@ -807,3 +807,14 @@ class SessionManager:
             "sessions": deleted_sessions,
             "dry_run": dry_run
         }
+
+    def cleanup(self):
+        """
+        清理会话管理器资源
+
+        当前 SessionManager 没有需要特别清理的资源，
+        此方法仅用于兼容性。
+        """
+        logger.debug("SessionManager cleanup: 无资源需要清理")
+        # 清理路径缓存
+        self._session_path_cache.clear()
