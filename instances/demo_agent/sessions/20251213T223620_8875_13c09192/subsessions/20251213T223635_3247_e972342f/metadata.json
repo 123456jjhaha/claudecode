@@ -1,0 +1,19 @@
+{
+  "session_id": "20251213T223635_3247_e972342f",
+  "instance_name": "file_analyzer_agent",
+  "start_time": "2025-12-13T22:36:35.043247",
+  "end_time": "2025-12-13T22:38:18.486977",
+  "status": "failed",
+  "prompts": [
+    {
+      "prompt": "## 变量\n- analysis_depth: detailed\n- include_file_stats: True\n\n\n## 相关文件\n- s\n- r\n- c\n- /\n\n\n请以 JSON 格式返回结果。\n\n## 任务\n分析 src/ 目录的完整结构，包括文件类型分布、代码组织方式、主要模块功能等",
+      "timestamp": "2025-12-13T22:36:35.043247"
+    }
+  ],
+  "results": [],
+  "depth": 1,
+  "parent_session_id": "20251213T223620_8875_13c09192",
+  "context": {},
+  "claude_session_id": "4b041bf9-c44c-44e1-b40e-69dee671b3c1",
+  "error": "Cancelled via cancel scope 25c09e7b650 by <Task pending name='Task-1' coro=<main() running at c:\\Users\\Lenovo\\Desktop\\test2\\claudecode\\test_subsystem_recording.py:305> cb=[_run_until_complete_cb() at C:\\Users\\Lenovo\\AppData\\Roaming\\uv\\python\\cpython-3.12.9-windows-x86_64-none\\Lib\\asyncio\\base_events.py:181]>"
+}

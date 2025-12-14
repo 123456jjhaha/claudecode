@@ -17,6 +17,7 @@ from .instance_manager import InstanceManager
 from .mcp_config_loader import load_mcp_config, merge_mcp_configs
 from .error_handling import AgentSystemError
 from .logging_config import get_logger
+from .stream_manager import QueryStreamManager
 
 logger = get_logger(__name__)
 
@@ -342,8 +343,6 @@ class AgentSystem:
 
         if resume_session_id:
             # === Resume 模式 ===
-            from .session_context import set_current_session
-
             # 1. 加载之前的会话
             session = self.session_manager.get_session(resume_session_id)
             logger.info(f"恢复会话: {resume_session_id}")
@@ -377,28 +376,27 @@ class AgentSystem:
                 "timestamp": datetime.now().isoformat()
             })
 
-            set_current_session(session)
+            # 注意：不需要手动调用 set_current_session()
+            # QueryStreamManager 会在 __aenter__ 时自动设置上下文
 
         elif record_session and self.session_manager:
             # === 新会话模式 ===
-            from .session_context import set_current_session
-
             session = await self.session_manager.create_session(
                 initial_prompt=prompt,
                 context=None
             )
             session_id = session.session_id
             query_options = self._options
-            set_current_session(session)  # 设置上下文
 
         else:
             # 不记录会话
             session_id = None
             query_options = self._options
 
-        # 创建内部异步生成器
+        # 创建内部异步生成器（使用 QueryStreamManager 管理生命周期）
         async def _query_generator():
-            try:
+            # 使用 StreamManager 确保资源正确管理
+            async with QueryStreamManager(session, query_options) as stream_mgr:
                 # 记录用户消息（在调用 query 之前）
                 if session:
                     # 创建 UserMessage 对象用于记录
@@ -409,11 +407,11 @@ class AgentSystem:
                 # 修复：使用异步生成器提示词而不是字符串提示词
                 # 这是为了解决 Claude Agent SDK 的一个已知 bug (Issue #266, #386)
                 # 当使用 SDK MCP 服务器时，字符串提示词会导致 ProcessTransport 错误
-                async def prompt_generator():
-                    yield {"type": "user", "message": {"role": "user", "content": prompt}}
+                # async def prompt_generator():
+                #     yield {"type": "user", "message": {"role": "user", "content": prompt}}
 
                 # 执行查询并记录消息
-                async for message in query(prompt=prompt_generator(), options=query_options):
+                async for message in query(prompt=prompt, options=query_options):
                     # 在第一条 SystemMessage 中获取 Claude session_id
                     if isinstance(message, SystemMessage) and message.subtype == 'init':
                         if session and 'claude_session_id' not in session.metadata:
@@ -437,27 +435,8 @@ class AgentSystem:
                     # 检查是否是 ResultMessage（会话结束）
                     message_type = type(message).__name__
                     if message_type == "ResultMessage":
-                        if session:
-                            await session.finalize(result_message=message)
-
-            except Exception as e:
-                # 记录错误
-                if session:
-                    session.metadata['status'] = 'failed'
-                    session.metadata['error'] = str(e)
-                    await session.finalize()
-                raise AgentSystemError(f"查询失败: {e}")
-
-            finally:
-                # 确保会话被正确处理
-                if session and session.metadata.get('status') == 'running':
-                    # 会话未正常结束，标记为中断
-                    session.metadata['status'] = 'interrupted'
-                    session.metadata['error'] = 'Connection was interrupted'
-                    await session.finalize()
-
-                from .session_context import set_current_session
-                set_current_session(None)  # 清理上下文
+                        # 使用 StreamManager 的幂等 finalize
+                        await stream_mgr.finalize_on_result(message)
 
         # 返回 QueryStream 对象
         return QueryStream(_query_generator(), session_id)

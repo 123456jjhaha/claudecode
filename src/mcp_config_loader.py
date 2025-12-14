@@ -66,11 +66,31 @@ def load_mcp_config(instance_path: Path) -> dict[str, dict[str, Any]]:
             server_type = server_config.get("type", "stdio")
 
             # 验证配置完整性
-            if _validate_server_config(server_name, server_type, server_config):
-                validated_servers[server_name] = server_config
-                logger.debug(f"加载 MCP 服务器: {server_name} (type={server_type})")
-            else:
+            if not _validate_server_config(server_name, server_type, server_config):
                 logger.warning(f"跳过无效的服务器配置: {server_name}")
+                continue
+
+            # 健康检查：过滤掉明显会失败的配置
+            if server_type == 'stdio':
+                command = server_config.get('command', '')
+
+                # 跳过示例/测试配置（避免污染 MCP 系统）
+                if command.lower() in ['echo', 'test', 'example', 'demo']:
+                    logger.warning(
+                        f"跳过示例 MCP 服务器配置: {server_name} "
+                        f"(command={command})"
+                    )
+                    continue
+
+                # TODO: 可以添加更多检查，如验证命令是否在 PATH 中
+                # import shutil
+                # if not shutil.which(command):
+                #     logger.warning(f"命令不存在: {command}")
+                #     continue
+
+            # 通过所有检查，添加到 validated_servers
+            validated_servers[server_name] = server_config
+            logger.debug(f"加载 MCP 服务器: {server_name} (type={server_type})")
 
         logger.info(f"成功加载 {len(validated_servers)} 个 MCP 服务器")
         return validated_servers

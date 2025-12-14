@@ -1,0 +1,19 @@
+{
+  "session_id": "20251213T213333_5432_dca1909e",
+  "instance_name": "file_analyzer_agent",
+  "start_time": "2025-12-13T21:33:33.845432",
+  "end_time": "2025-12-13T21:33:48.876989",
+  "status": "failed",
+  "prompts": [
+    {
+      "prompt": "## 变量\n- analysis_type: overview\n\n\n## 相关文件\n- s\n- r\n- c\n- /\n\n\n## 任务\n分析 src/ 目录结构，提供简洁的概览",
+      "timestamp": "2025-12-13T21:33:33.845432"
+    }
+  ],
+  "results": [],
+  "depth": 1,
+  "parent_session_id": "20251213T213307_8509_aaa2ef61",
+  "context": {},
+  "claude_session_id": "e5de9151-930f-4e9a-8aec-9044cfa6c575",
+  "error": ""
+}

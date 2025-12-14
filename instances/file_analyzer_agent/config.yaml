@@ -66,18 +66,20 @@ session_recording:
 
 # 高级配置
 advanced:
-  permission_mode: "acceptEdits"
-  max_turns: 25                   # 文件分析通常需要多轮交互
+  permission_mode: "bypassPermissions"  # 改为这个，跳过权限检查
+  max_turns: 100                   # 文件分析通常需要多轮交互
   setting_sources:
     - "project"
     - "user"
 
   # 环境变量
   env:
-    PYTHONPATH: "."
-    FILE_ANALYSIS_DEPTH: "deep"   # 深度分析模式
-
+    # PYTHONPATH: "."
+    # FILE_ANALYSIS_DEPTH: "deep"   # 深度分析模式
+    CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "3000000"  # 5分钟 - 避免SDK强制关闭流
+    MCP_TIMEOUT: "120000"                       # 2分钟 - MCP服务器启动超时
+    MCP_TOOL_TIMEOUT: "1800000"   
   # 额外的目录访问权限
-  add_dirs:
-    - "../data"                   # 允许访问数据目录
-    - "./logs"                    # 允许访问日志目录
+  # add_dirs:
+  #   - "../data"                   # 允许访问数据目录
+  #   - "./logs"                    # 允许访问日志目录

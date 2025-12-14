@@ -1,0 +1,33 @@
+{
+  "session_id": "20251213T212942_0071_5eafc7bf",
+  "total_duration_ms": 26417,
+  "api_duration_ms": 36831,
+  "num_turns": 7,
+  "num_messages": 18,
+  "num_tool_calls": 6,
+  "tools_used": {
+    "mcp__custom_tools__calculator__calculate": 1,
+    "mcp__sub_instances__sub_claude_file_analyzer": 2,
+    "mcp__custom_tools__text_processor__extract_keywords": 1,
+    "mcp__sub_instances__sub_claude_syntax_checker": 2
+  },
+  "subsessions": [],
+  "token_usage": {
+    "input_tokens": 21973,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 44288,
+    "output_tokens": 1338,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    }
+  },
+  "cost_usd": 0.11888330000000001,
+  "final_status": "completed",
+  "error_count": 0
+}

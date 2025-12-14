@@ -89,6 +89,11 @@ def create_claude_instance_tool(
         执行子 Claude 实例
 
         工具被调用时，动态创建 AgentSystem 实例并执行。
+        """
+        """
+        执行子 Claude 实例
+
+        工具被调用时，动态创建 AgentSystem 实例并执行。
 
         Args:
             args: 工具参数
@@ -130,26 +135,63 @@ def create_claude_instance_tool(
         try:
             # 延迟导入，避免循环依赖
             from .agent_system import AgentSystem
+            from .session_context import get_current_session, set_current_session
 
-            # 创建子 Claude 的 AgentSystem 实例
-            # API 密钥会自动从环境变量 ANTHROPIC_API_KEY 读取
-            sub_agent = AgentSystem(
-                instance_name=str(instance_path),
-                instances_root=instances_root
+            # 保存父级上下文（防止子实例污染）
+            parent_session = get_current_session()
+            logger.debug(
+                f"[SubInstance] Saving parent context: "
+                f"{parent_session.session_id if parent_session else None}"
             )
 
-            # 初始化子实例
-            await sub_agent.initialize()
+            try:
+                # 创建子 Claude 的 AgentSystem 实例
+                # API 密钥会自动从环境变量 ANTHROPIC_API_KEY 读取
+                sub_agent = AgentSystem(
+                    instance_name=str(instance_path),
+                    instances_root=instances_root
+                )
 
-            # 构建提示词
-            prompt = _build_prompt(task, context_files, variables, output_format)
+                # 初始化子实例
+                await sub_agent.initialize()
 
-            # 执行查询（支持 resume）
-            query_result = await sub_agent.query_text(
-                prompt,
-                record_session=True,
-                resume_session_id=resume_session_id
-            )
+                # 构建提示词
+                prompt = _build_prompt(task, context_files, variables, output_format)
+
+                # 执行查询（支持 resume）
+                # QueryStreamManager 会自动管理子实例的上下文
+                logger.info(f"开始执行子实例 {instance_name} 的查询...")
+
+                # 直接执行，不捕获异常（让外层的 except Exception as e 处理）
+                # 这样可以避免异常传播到 Claude SDK 的 TaskGroup，防止取消其他并行任务
+                query_result = await sub_agent.query_text(
+                    prompt,
+                    record_session=True,
+                    resume_session_id=resume_session_id
+                )
+
+                if not query_result.result:
+                    logger.warning(f"子实例 {instance_name} 返回空结果")
+
+                logger.info(f"子实例 {instance_name} 执行成功，会话ID: {query_result.session_id}")
+
+            finally:
+                # 显式恢复父级上下文（额外的安全保障）
+                # 虽然 QueryStreamManager 已经使用 token 恢复，但这是双重保险
+                current = get_current_session()
+                if current != parent_session:
+                    logger.warning(
+                        f"[SubInstance] Context mismatch detected! "
+                        f"Restoring parent context. "
+                        f"Current: {current.session_id if current else None}, "
+                        f"Expected: {parent_session.session_id if parent_session else None}"
+                    )
+                    set_current_session(parent_session)
+                else:
+                    logger.debug(
+                        f"[SubInstance] Context correctly restored: "
+                        f"{parent_session.session_id if parent_session else None}"
+                    )
 
             # 构建标准 MCP 工具返回格式
             result = {
@@ -172,11 +214,23 @@ def create_claude_instance_tool(
             return result
 
         except Exception as e:
-            logger.error(f"子实例执行失败: {e}", exc_info=True)
+            logger.error(f"子实例 {instance_name} 执行失败: {e}", exc_info=True)
+
+            # 提供更详细的错误信息
+            error_msg = f"子实例 {instance_name} 执行失败: {str(e)}"
+
+            # 根据异常类型提供更有用的错误提示
+            if "permission" in str(e).lower():
+                error_msg += "\n提示：可能是工具权限问题，请检查子实例的配置。"
+            elif "timeout" in str(e).lower():
+                error_msg += "\n提示：执行超时，请尝试简化任务或检查网络连接。"
+            elif "connection" in str(e).lower():
+                error_msg += "\n提示：连接问题，请检查 API 密钥和网络设置。"
+
             return {
                 "content": [{
                     "type": "text",
-                    "text": f"子实例执行失败: {str(e)}"
+                    "text": error_msg
                 }],
                 "is_error": True
             }

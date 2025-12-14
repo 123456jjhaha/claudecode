@@ -1,0 +1,1 @@
+{"seq": 0, "timestamp": "2025-12-13T23:36:18.775031", "message_type": "UserMessage", "data": {"role": "user", "content": [{"type": "text", "text": "\n        请创建一个嵌套的工作流：\n        1. 首先使用file_analyzer子实例分析项目结构\n        2. 然后让file_analyzer子实例调用syntax_checker来检查它发现的文件\n        3. 最后返回综合报告\n        "}]}}

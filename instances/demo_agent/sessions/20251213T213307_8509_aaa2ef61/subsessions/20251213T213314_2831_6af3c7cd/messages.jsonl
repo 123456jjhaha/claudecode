@@ -1,0 +1,1 @@
+{"seq": 0, "timestamp": "2025-12-13T21:33:14.033864", "message_type": "UserMessage", "data": {"role": "user", "content": [{"type": "text", "text": "## 变量\n- timeout: 5\n- analysis_depth: detailed\n\n\n## 相关文件\n- s\n- r\n- c\n- /\n\n\n## 任务\n分析 src/ 目录结构，包括：\n1. 目录层级结构\n2. 文件类型分布\n3. 主要模块和文件的功能\n4. 代码组织架构分析\n5. 依赖关系分析（如果可能）"}]}}

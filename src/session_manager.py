@@ -497,6 +497,9 @@ class SessionManager:
         if self.config.get("enabled"):
             self.sessions_dir.mkdir(parents=True, exist_ok=True)
 
+        # 新增：会话路径缓存（用于递归查找子会话）
+        self._session_path_cache: dict[str, Path] = {}
+
     async def create_session(
         self,
         initial_prompt: str,
@@ -566,38 +569,103 @@ class SessionManager:
 
         return session
 
-    def get_session(self, session_id: str) -> Session:
+    def _build_session_path_cache(self) -> None:
+        """
+        构建会话 ID 到路径的缓存
+
+        递归扫描所有 sessions/ 和 subsessions/ 目录，
+        将每个会话 ID 映射到其完整路径。
+
+        这样可以快速查找任意深度的子会话。
+        """
+        self._session_path_cache.clear()
+
+        def scan_directory(base_dir: Path):
+            """递归扫描目录"""
+            if not base_dir.exists():
+                return
+
+            for session_dir in base_dir.iterdir():
+                if session_dir.is_dir():
+                    # 从目录名提取 session_id
+                    session_id = session_dir.name
+                    self._session_path_cache[session_id] = session_dir
+
+                    # 递归扫描 subsessions
+                    subsessions_dir = session_dir / "subsessions"
+                    if subsessions_dir.exists():
+                        scan_directory(subsessions_dir)
+
+        scan_directory(self.sessions_dir)
+        logger.debug(f"缓存了 {len(self._session_path_cache)} 个会话路径")
+
+    def get_session(self, session_id: str, rebuild_cache: bool = False) -> Session:
         """
         获取已存在的会话对象（用于 resume）
 
+        支持递归查找子会话，并恢复 parent_session 引用。
+
         Args:
             session_id: 会话 ID
+            rebuild_cache: 是否重建路径缓存
 
         Returns:
-            Session 对象
+            Session 对象（保留完整的 parent 引用）
 
         Raises:
             AgentSystemError: 会话不存在
         """
-        session_dir = self.sessions_dir / session_id
+        # 重建缓存（如果需要）
+        if rebuild_cache or not self._session_path_cache:
+            self._build_session_path_cache()
 
-        if not session_dir.exists():
+        # 从缓存查找
+        session_dir = self._session_path_cache.get(session_id)
+
+        if not session_dir:
+            # 缓存未命中，尝试重建缓存再查找一次
+            self._build_session_path_cache()
+            session_dir = self._session_path_cache.get(session_id)
+
+        if not session_dir or not session_dir.exists():
             raise AgentSystemError(f"会话不存在: {session_id}")
 
+        # 读取元数据
         metadata_file = session_dir / "metadata.json"
         if not metadata_file.exists():
-            raise AgentSystemError(f"会话元数据文件不存在: {session_id}")
+            raise AgentSystemError(f"会话元数据缺失: {session_id}")
 
         with open(metadata_file, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
 
-        return Session(
+        # ✅ 关键：恢复 parent_session 引用
+        parent_session = None
+        parent_session_id = metadata.get('parent_session_id')
+
+        if parent_session_id:
+            # 递归加载父会话
+            try:
+                parent_session = self.get_session(parent_session_id)
+                logger.debug(f"恢复父会话引用: {parent_session_id}")
+            except Exception as e:
+                logger.warning(f"无法加载父会话 {parent_session_id}: {e}")
+                # 不抛出异常，允许子会话独立使用
+
+        # 创建 Session 对象
+        session = Session(
             session_id=session_id,
             session_dir=session_dir,
             metadata=metadata,
-            parent_session=None,
-            config=self.config  # 传递配置，确保消息过滤等配置生效
+            parent_session=parent_session,  # ✅ 保留父引用
+            config=self.config
         )
+
+        # 设置状态为可追加（重要：允许 resume 时追加消息）
+        session._finalized = False
+
+        logger.info(f"加载会话: {session_id}, parent={parent_session_id}")
+
+        return session
 
     def list_sessions(
         self,
@@ -643,6 +711,36 @@ class SessionManager:
 
         # 分页
         return sessions[offset:offset + limit]
+
+    def list_all_sessions(self, include_subsessions: bool = True) -> List[dict]:
+        """
+        列出所有会话（包括子会话）
+
+        Args:
+            include_subsessions: 是否包含子会话（默认 True）
+
+        Returns:
+            会话信息列表（包含 session_id, path, depth, parent_id, status, created_at）
+        """
+        self._build_session_path_cache()
+
+        sessions = []
+        for session_id, session_path in self._session_path_cache.items():
+            metadata_file = session_path / "metadata.json"
+            if metadata_file.exists():
+                with open(metadata_file, 'r', encoding='utf-8') as f:
+                    metadata = json.load(f)
+
+                sessions.append({
+                    "session_id": session_id,
+                    "path": str(session_path),
+                    "depth": metadata.get('depth', 0),
+                    "parent_session_id": metadata.get('parent_session_id'),
+                    "status": metadata.get('status'),
+                    "created_at": metadata.get('created_at')
+                })
+
+        return sorted(sessions, key=lambda x: x['created_at'], reverse=True)
 
     def cleanup_old_sessions(
         self,

@@ -1,0 +1,19 @@
+{
+  "session_id": "20251213T213010_9615_e5cadca9",
+  "instance_name": "demo_agent",
+  "start_time": "2025-12-13T21:30:10.409615",
+  "end_time": "2025-12-13T21:30:32.147380",
+  "status": "failed",
+  "prompts": [
+    {
+      "prompt": "\n    使用 file_analyzer 子实例分析 src/ 目录结构。\n\n    重要：设置 timeout=5 秒（故意设置很短以测试超时处理）\n    ",
+      "timestamp": "2025-12-13T21:30:10.409615"
+    }
+  ],
+  "results": [],
+  "depth": 0,
+  "parent_session_id": null,
+  "context": {},
+  "claude_session_id": "d3e8b322-f811-42ef-be47-c7bcc08fb53e",
+  "error": ""
+}

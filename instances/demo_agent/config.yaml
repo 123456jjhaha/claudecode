@@ -45,9 +45,6 @@ tools:
   allowed:
     # 自定义工具（来自 tools/ 目录）
     - "mcp__custom_tools__calculator__*"
-    - "mcp__custom_tools__file_analyzer__*"
-    - "mcp__custom_tools__text_processor__*"
-
     # 子实例工具
     - "mcp__sub_instances__sub_claude_*"
 
@@ -59,10 +56,9 @@ tools:
 # ==================== 子实例配置 ====================
 #
 # 子实例是独立的 Agent 实例，可以有自己的配置、工具和会话记录
-sub_claude_instances:
-  file_analyzer: "file_analyzer_agent"      # 文件分析子实例
-  syntax_checker: "syntax_checker_agent"  # 语法检查子实例
-  code_reviewer: "code_reviewer_agent"    # 代码审查子实例
+# sub_claude_instances:
+#   file_analyzer: "file_analyzer_agent"      # 文件分析子实例
+#   syntax_checker: "syntax_checker_agent"  # 语法检查子实例
 
 
 # ==================== 会话记录配置 ====================
@@ -98,10 +94,10 @@ session_recording:
 # ==================== 高级配置 ====================
 advanced:
   # 权限模式
-  permission_mode: "acceptEdits"    # 可选值：default, acceptEdits, plan, bypassPermissions
-
+  # permission_mode: "acceptEdits"    # 可选值：default, acceptEdits, plan, bypassPermissions
+  permission_mode: "bypassPermissions"  # 改为这个，跳过权限检查
   # 执行限制
-  max_turns: 50                    # 最大对话轮次
+  max_turns: 100                    # 最大对话轮次
 
   # 配置源优先级
   setting_sources:
@@ -109,10 +105,36 @@ advanced:
     - "user"                       # 其次用户级配置
 
   # 环境变量（传递给子进程）
-  env: {}
-  # 可选的环境变量配置
-  # PYTHONPATH: "."
-  # DEMO_MODE: "true"
+  env:
+    # ==================== SDK 超时配置 ====================
+    #
+    # 说明：这些环境变量用于控制 Claude SDK 的超时行为，避免子实例执行时崩溃
+    #
+    # 1. CLAUDE_CODE_STREAM_CLOSE_TIMEOUT:
+    #    作用：控制 SDK 等待第一个结果的超时时间（毫秒）
+    #    默认：60000ms (60秒)
+    #    问题：如果子实例在 60 秒内没有返回第一个结果，SDK 会强制关闭流，导致子实例崩溃
+    #    建议：设置为 300000ms (5分钟)，给子实例充足的执行时间
+    #
+    # 2. MCP_TIMEOUT:
+    #    作用：MCP 服务器启动超时时间（毫秒）
+    #    默认：30000ms (30秒)
+    #    说明：启动子实例的 MCP 服务器时的等待时间
+    #    建议：设置为 120000ms (2分钟)，给复杂的服务器更多启动时间
+    #
+    # 3. MCP_TOOL_TIMEOUT:
+    #    作用：单个 MCP 工具执行超时时间（毫秒）
+    #    默认：可能存在 bug，不一定生效
+    #    说明：控制工具执行的超时时间
+    #    建议：设置为 180000ms (3分钟)，作为额外的保障
+    #
+    CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "3000000"  # 5分钟 - 避免SDK强制关闭流
+    MCP_TIMEOUT: "120000"                       # 2分钟 - MCP服务器启动超时
+    MCP_TOOL_TIMEOUT: "1800000"                  # 3分钟 - MCP工具执行超时
+
+    # 其他可选的环境变量配置
+    # PYTHONPATH: "."
+    # DEMO_MODE: "true"
 
   # 额外的目录访问权限（添加到工作目录）
   add_dirs:

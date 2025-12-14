@@ -1,0 +1,18 @@
+{
+  "session_id": "20251213T232713_6122_db5a6a58",
+  "instance_name": "file_analyzer_agent",
+  "start_time": "2025-12-13T23:27:13.496122",
+  "end_time": null,
+  "status": "running",
+  "prompts": [
+    {
+      "prompt": "## 变量\n- analysis_depth: detailed\n\n\n## 相关文件\n- s\n- r\n- c\n- /\n\n\n## 任务\n分析 src/ 目录结构，包括文件类型分布、代码组织方式、主要模块功能等",
+      "timestamp": "2025-12-13T23:27:13.496122"
+    }
+  ],
+  "results": [],
+  "depth": 1,
+  "parent_session_id": "20251213T232645_0642_5fe248af",
+  "context": {},
+  "claude_session_id": "8c2aca52-d97c-4995-9345-877c161ccc3b"
+}

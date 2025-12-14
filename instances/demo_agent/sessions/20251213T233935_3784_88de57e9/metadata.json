@@ -1,0 +1,18 @@
+{
+  "session_id": "20251213T233935_3784_88de57e9",
+  "instance_name": "demo_agent",
+  "start_time": "2025-12-13T23:39:35.953784",
+  "end_time": "2025-12-13T23:39:41.726801",
+  "status": "failed",
+  "prompts": [
+    {
+      "prompt": "\n        请执行以下任务：\n        1. 使用calculator工具计算 15 * 8 + 32\n        2. 使用file_analyzer子实例分析 src/ 目录结构\n        3. 使用text_processor工具提取关键词\n        4. 使用syntax_checker子实例检查Python代码语法\n        ",
+      "timestamp": "2025-12-13T23:39:35.953784"
+    }
+  ],
+  "results": [],
+  "depth": 0,
+  "parent_session_id": null,
+  "context": {},
+  "error": "unhandled errors in a TaskGroup (1 sub-exception)"
+}

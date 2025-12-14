@@ -1,0 +1,19 @@
+{
+  "session_id": "20251213T231443_5911_fc9f8bc9",
+  "instance_name": "file_analyzer_agent",
+  "start_time": "2025-12-13T23:14:43.335911",
+  "end_time": "2025-12-13T23:15:59.912124",
+  "status": "failed",
+  "prompts": [
+    {
+      "prompt": "## 变量\n- focus: architecture\n\n\n## 相关文件\n- s\n- r\n- c\n- /\n\n\n请以 Markdown 格式返回结果。\n\n## 任务\n分析 src/ 目录的代码结构和组织方式",
+      "timestamp": "2025-12-13T23:14:43.335911"
+    }
+  ],
+  "results": [],
+  "depth": 1,
+  "parent_session_id": "20251213T231430_3625_22cb93de",
+  "context": {},
+  "claude_session_id": "d9d1176f-7acf-4c78-bd86-63d10e58a962",
+  "error": "Cancelled via cancel scope 1a7c572b590 by <Task pending name='Task-1' coro=<main() running at c:\\Users\\Lenovo\\Desktop\\test2\\claudecode\\test_subsystem_recording.py:305> cb=[_run_until_complete_cb() at C:\\Users\\Lenovo\\AppData\\Roaming\\uv\\python\\cpython-3.12.9-windows-x86_64-none\\Lib\\asyncio\\base_events.py:181]>"
+}

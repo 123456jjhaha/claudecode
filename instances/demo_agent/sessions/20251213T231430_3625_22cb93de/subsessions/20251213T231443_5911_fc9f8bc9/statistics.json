@@ -1,0 +1,19 @@
+{
+  "session_id": "20251213T231443_5911_fc9f8bc9",
+  "total_duration_ms": 0,
+  "api_duration_ms": 0,
+  "num_turns": 0,
+  "num_messages": 40,
+  "num_tool_calls": 16,
+  "tools_used": {
+    "Glob": 2,
+    "Bash": 10,
+    "Read": 3,
+    "mcp__custom_tools__content_analyzer__analyze_content": 1
+  },
+  "subsessions": [],
+  "token_usage": null,
+  "cost_usd": null,
+  "final_status": "running",
+  "error_count": 0
+}

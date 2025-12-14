@@ -925,6 +925,104 @@ session_recording:
   auto_cleanup: true       # 启用自动清理
 ```
 
+## ⚙️ SDK 超时配置（避免子实例崩溃）
+
+### 问题描述
+
+当你使用子实例时，可能会遇到子实例执行到一半就崩溃的问题。这通常是由 Claude SDK 的超时机制导致的：
+
+**默认行为**：
+- SDK 默认只等待 60 秒的第一个结果
+- 如果 60 秒内子实例没有返回响应，SDK 会强制关闭流
+- 这会导致 TaskGroup 被取消，所有并行任务被中断
+
+### 解决方案：配置超时环境变量
+
+在 `config.yaml` 的 `advanced.env` 部分添加以下配置：
+
+```yaml
+advanced:
+  env:
+    # === SDK 超时配置（避免子实例崩溃） ===
+
+    # 1. 流关闭超时（最重要的配置）
+    # 作用：控制 SDK 等待第一个结果的超时时间（毫秒）
+    # 默认：60000ms (60秒) - 太短，容易导致崩溃
+    # 建议：300000ms (5分钟) - 给子实例充足的执行时间
+    CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "300000"  # 5分钟
+
+    # 2. MCP 服务器启动超时
+    # 作用：启动子实例的 MCP 服务器时的等待时间
+    # 默认：30000ms (30秒)
+    # 建议：120000ms (2分钟)
+    MCP_TIMEOUT: "120000"                       # 2分钟
+
+    # 3. MCP 工具执行超时
+    # 作用：单个 MCP 工具执行的超时时间
+    # 默认：可能存在 bug，不一定生效
+    # 建议：180000ms (3分钟) - 作为额外保障
+    MCP_TOOL_TIMEOUT: "180000"                  # 3分钟
+```
+
+### 为什么需要这些配置？
+
+#### 1. CLAUDE_CODE_STREAM_CLOSE_TIMEOUT（最重要）
+- **问题**：SDK 在等待子实例的第一个结果时，默认只等待 60 秒
+- **后果**：如果子实例执行复杂任务（如代码分析、文件处理），60 秒可能不够用，SDK 会强制关闭流
+- **解决**：延长到 5 分钟，给子实例充足的时间
+
+#### 2. MCP_TIMEOUT
+- **作用**：控制 MCP 服务器启动的超时时间
+- **场景**：启动子实例时，需要等待 MCP 服务器就绪
+- **解决**：从 30 秒延长到 2 分钟，适合复杂的服务器
+
+#### 3. MCP_TOOL_TIMEOUT
+- **作用**：控制单个工具执行的超时时间
+- **注意**：当前可能存在 bug，不一定生效
+- **解决**：设置为 3 分钟作为额外保障
+
+### 配置示例
+
+```yaml
+# 完整的实例配置示例
+agent:
+  name: "my_agent"
+  description: "我的智能体"
+
+model: "claude-sonnet-4-5"
+
+# 子实例配置
+sub_claude_instances:
+  code_analyzer: "code_analyzer_agent"
+  file_processor: "file_processor_agent"
+
+# 超时配置
+advanced:
+  env:
+    CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "300000"  # 5分钟
+    MCP_TIMEOUT: "120000"                       # 2分钟
+    MCP_TOOL_TIMEOUT: "180000"                  # 3分钟
+```
+
+### 验证配置
+
+```python
+# 检查环境变量是否设置成功
+import os
+
+print(f"流关闭超时: {os.environ.get('CLAUDE_CODE_STREAM_CLOSE_TIMEOUT')}ms")
+print(f"MCP 超时: {os.environ.get('MCP_TIMEOUT')}ms")
+print(f"MCP 工具超时: {os.environ.get('MCP_TOOL_TIMEOUT')}ms")
+```
+
+### 效果
+
+配置后：
+- ✅ 子实例不会因为执行时间长而崩溃
+- ✅ 复杂任务可以正常完成
+- ✅ 避免了 SDK 强制关闭流导致的 TaskGroup 取消
+- ✅ 提供了更稳定的用户体验
+
 ## 错误处理
 
 ```python
