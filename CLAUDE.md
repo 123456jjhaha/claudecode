@@ -120,6 +120,28 @@ instances/agent_name/sessions/
         └── 20251211T061800_0001_b4e8d3f9/  # 子会话
 ```
 
+**✨ 子实例 Session 自动追踪**：
+
+系统会自动检测并记录子实例的 session_id，无需手动配置：
+
+1. **自动提取**：当检测到子实例工具调用时，自动从返回结果中提取 `session_id`
+2. **关联记录**：将子实例 session_id 保存到父会话的统计信息中
+3. **完整追踪**：支持递归追踪多层嵌套的子实例调用
+
+```python
+# 使用子实例后，statistics.json 自动包含：
+{
+  "subsessions": [
+    {
+      "session_id": "20251211T061800_0001_b4e8d3f9",
+      "tool_name": "mcp__custom_tools__sub_claude_file_analyzer",
+      "tool_use_id": "toolu_abc123",
+      "timestamp": "2025-12-14T10:30:00"
+    }
+  ]
+}
+```
+
 ### 6. 延迟实例化
 
 **设计原则**：配置加载时只创建工具定义，工具被调用时才实例化。

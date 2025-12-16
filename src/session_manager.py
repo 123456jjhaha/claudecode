@@ -152,6 +152,135 @@ class Session:
                     self._statistics.tools_used[tool_name] = \
                         self._statistics.tools_used.get(tool_name, 0) + 1
 
+        # ✅ 新增：检查是否是子实例工具调用的结果
+        if message_type == "AssistantMessage":
+            from claude_agent_sdk import ToolResultBlock
+
+            for block in message.content:
+                if isinstance(block, ToolResultBlock):
+                    # 提取工具调用 ID（用于匹配之前的 ToolUseBlock）
+                    tool_use_id = block.tool_use_id
+
+                    # 查找对应的 ToolUseBlock（在之前的消息中）
+                    tool_name = self._find_tool_name_by_id(tool_use_id)
+
+                    # 检查是否是子实例工具（以 mcp__custom_tools__sub_claude_ 开头）
+                    if tool_name and "sub_claude_" in tool_name:
+                        # 尝试从工具结果中提取 session_id
+                        sub_session_id = self._extract_sub_session_id(block)
+
+                        if sub_session_id:
+                            # 记录子会话信息
+                            self._statistics.subsessions.append({
+                                "session_id": sub_session_id,
+                                "tool_name": tool_name,
+                                "tool_use_id": tool_use_id,
+                                "timestamp": datetime.now().isoformat()
+                            })
+                            logger.info(f"检测到子实例调用: {tool_name} -> {sub_session_id}")
+
+    def _find_tool_name_by_id(self, tool_use_id: str) -> Optional[str]:
+        """
+        根据 tool_use_id 查找工具名称
+
+        Args:
+            tool_use_id: 工具调用 ID
+
+        Returns:
+            工具名称，如果未找到则返回 None
+        """
+        from claude_agent_sdk import ToolUseBlock
+
+        # 遍历已记录的消息，查找匹配的 ToolUseBlock
+        for msg_data in self._messages:
+            message = msg_data['message']
+            if type(message).__name__ == "AssistantMessage":
+                for block in message.content:
+                    if isinstance(block, ToolUseBlock) and block.id == tool_use_id:
+                        return block.name
+
+        return None
+
+    def _extract_sub_session_id(self, tool_result_block: Any) -> Optional[str]:
+        """
+        从 ToolResultBlock 中提取子实例的 session_id
+
+        Args:
+            tool_result_block: ToolResultBlock 对象
+
+        Returns:
+            session_id 字符串，如果不存在则返回 None
+        """
+        try:
+            import json
+            import re
+
+            # ToolResultBlock.content 可能是字符串或列表
+            content = tool_result_block.content
+
+            # 如果是列表，查找包含 session_id 的 block
+            if isinstance(content, list):
+                for block in content:
+                    # 检查 TextBlock
+                    if hasattr(block, 'text'):
+                        text = block.text
+
+                        # 新格式：使用特殊标记 <!--SESSION_ID:xxx-->
+                        match = re.search(r'<!--SESSION_ID:([^>]+)-->', text)
+                        if match:
+                            return match.group(1)
+
+                        # 尝试解析 JSON（兼容旧格式）
+                        try:
+                            data = json.loads(text)
+                            if isinstance(data, dict):
+                                # 检查是否有 result 字段（MCP 包装的）
+                                if "result" in data and isinstance(data["result"], dict):
+                                    data = data["result"]
+
+                                session_id = data.get("session_id")
+                                if session_id:
+                                    return session_id
+                        except json.JSONDecodeError:
+                            pass
+
+                    # 检查是否是工具结果的字典格式
+                    if isinstance(block, dict):
+                        data = block
+                        # 检查是否有 result 字段（MCP 包装的）
+                        if "result" in data and isinstance(data["result"], dict):
+                            data = data["result"]
+
+                        if "session_id" in data:
+                            return data["session_id"]
+
+            # 如果是字符串，尝试解析
+            elif isinstance(content, str):
+                # 新格式：使用特殊标记
+                match = re.search(r'<!--SESSION_ID:([^>]+)-->', content)
+                if match:
+                    return match.group(1)
+
+                # 尝试解析 JSON（兼容旧格式）
+                try:
+                    data = json.loads(content)
+                    if isinstance(data, dict):
+                        # 检查是否有 result 字段（MCP 包装的）
+                        if "result" in data and isinstance(data["result"], dict):
+                            data = data["result"]
+
+                        session_id = data.get("session_id")
+                        if session_id:
+                            return session_id
+                except json.JSONDecodeError:
+                    pass
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"提取 session_id 失败: {e}")
+            return None
+
     async def finalize(self, result_message: Optional[Any] = None) -> None:
         """
         完成会话（一次性写入所有数据到磁盘）
@@ -450,6 +579,165 @@ class Session:
             ))
 
         return subsessions
+
+    def get_merged_messages(
+        self,
+        include_subsessions: bool = True,
+        message_types: Optional[List[str]] = None,
+        indent_level: int = 0
+    ) -> Generator[dict, None, None]:
+        """
+        获取整合的消息（包括子会话）
+
+        Args:
+            include_subsessions: 是否包含子会话消息
+            message_types: 过滤消息类型
+            indent_level: 缩进层级（用于树状展示）
+
+        Yields:
+            整合后的消息字典，包含：
+            - seq: 消息序列号
+            - timestamp: 时间戳
+            - message_type: 消息类型
+            - data: 消息数据
+            - session_id: 所属会话 ID
+            - depth: 嵌套深度
+            - indent_level: 缩进层级
+        """
+        # 读取主会话消息
+        for msg in self.get_messages(message_types=message_types):
+            yield {
+                **msg,
+                "session_id": self.session_id,
+                "depth": self.metadata.get('depth', 0),
+                "indent_level": indent_level
+            }
+
+            # ✅ 如果这条消息是子实例工具调用，插入子会话消息
+            if include_subsessions and msg['message_type'] == "AssistantMessage":
+                # 检查是否有 ToolResultBlock
+                if 'data' in msg and 'content' in msg['data']:
+                    for block in msg['data']['content']:
+                        if block.get('type') == 'tool_result':
+                            # 查找对应的子会话
+                            sub_session_id = self._find_subsession_by_tool_result(block)
+
+                            if sub_session_id:
+                                # 递归获取子会话消息
+                                sub_session = self._load_subsession(sub_session_id)
+                                if sub_session:
+                                    yield from sub_session.get_merged_messages(
+                                        include_subsessions=True,
+                                        message_types=message_types,
+                                        indent_level=indent_level + 1
+                                    )
+
+    def _find_subsession_by_tool_result(self, tool_result_block: dict) -> Optional[str]:
+        """
+        根据 ToolResultBlock 查找对应的子会话 ID
+
+        Args:
+            tool_result_block: ToolResultBlock 字典
+
+        Returns:
+            子会话 ID，如果未找到则返回 None
+        """
+        try:
+            import json
+            import re
+
+            # 从 content 中提取 session_id
+            content = tool_result_block.get('content')
+
+            if isinstance(content, str):
+                # 新格式：使用特殊标记
+                match = re.search(r'<!--SESSION_ID:([^>]+)-->', content)
+                if match:
+                    return match.group(1)
+
+                # 尝试解析 JSON（兼容旧格式）
+                try:
+                    data = json.loads(content)
+                    if isinstance(data, dict):
+                        # 检查是否有 result 字段（MCP 包装的）
+                        if "result" in data and isinstance(data["result"], dict):
+                            data = data["result"]
+
+                        return data.get("session_id")
+                except json.JSONDecodeError:
+                    pass
+
+            elif isinstance(content, list):
+                for block in content:
+                    # 检查 TextBlock
+                    if hasattr(block, 'text'):
+                        # 新格式：使用特殊标记
+                        match = re.search(r'<!--SESSION_ID:([^>]+)-->', block.text)
+                        if match:
+                            return match.group(1)
+
+                        # 尝试解析 JSON（兼容旧格式）
+                        try:
+                            data = json.loads(block.text)
+                            if isinstance(data, dict):
+                                # 检查是否有 result 字段（MCP 包装的）
+                                if "result" in data and isinstance(data["result"], dict):
+                                    data = data["result"]
+
+                                session_id = data.get("session_id")
+                                if session_id:
+                                    return session_id
+                        except json.JSONDecodeError:
+                            continue
+
+                    # 检查是否是字典格式的 block
+                    if isinstance(block, dict):
+                        if "session_id" in block:
+                            return block["session_id"]
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"查找子会话 ID 失败: {e}")
+            return None
+
+    def _load_subsession(self, session_id: str) -> Optional['Session']:
+        """
+        加载子会话对象
+
+        Args:
+            session_id: 子会话 ID
+
+        Returns:
+            Session 对象，如果加载失败则返回 None
+        """
+        try:
+            subsessions_dir = self.session_dir / "subsessions"
+            session_dir = subsessions_dir / session_id
+
+            if not session_dir.exists():
+                logger.warning(f"子会话目录不存在: {session_dir}")
+                return None
+
+            metadata_file = session_dir / "metadata.json"
+            if not metadata_file.exists():
+                logger.warning(f"子会话元数据不存在: {metadata_file}")
+                return None
+
+            with open(metadata_file, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+
+            return Session(
+                session_id=session_id,
+                session_dir=session_dir,
+                metadata=metadata,
+                parent_session=self,
+                config=self.config
+            )
+
+        except Exception as e:
+            logger.error(f"加载子会话失败 {session_id}: {e}")
+            return None
 
 
 class SessionManager:
@@ -807,6 +1095,156 @@ class SessionManager:
             "sessions": deleted_sessions,
             "dry_run": dry_run
         }
+
+    def get_session_tree(self, session_id: str) -> Dict[str, Any]:
+        """
+        获取会话树（包含所有子会话的层级结构）
+
+        Args:
+            session_id: 主会话 ID
+
+        Returns:
+            会话树字典，包含：
+            - session_id: 会话 ID
+            - metadata: 会话元数据
+            - statistics: 统计信息
+            - subsessions: 子会话树列表（递归）
+        """
+        session = self.get_session(session_id)
+
+        # 读取统计信息
+        statistics_file = session.session_dir / "statistics.json"
+        statistics = {}
+        if statistics_file.exists():
+            with open(statistics_file, 'r', encoding='utf-8') as f:
+                statistics = json.load(f)
+
+        # 递归获取子会话
+        subsessions = []
+        for sub_session in session.get_subsessions():
+            subsessions.append(self.get_session_tree(sub_session.session_id))
+
+        return {
+            "session_id": session_id,
+            "metadata": session.get_metadata(),
+            "statistics": statistics,
+            "subsessions": subsessions
+        }
+
+    def print_session_tree(
+        self,
+        session_id: str,
+        include_statistics: bool = True,
+        indent: int = 0
+    ) -> str:
+        """
+        打印会话树（树状格式）
+
+        Args:
+            session_id: 主会话 ID
+            include_statistics: 是否包含统计信息
+            indent: 缩进层级
+
+        Returns:
+            树状格式的字符串
+        """
+        tree = self.get_session_tree(session_id)
+        return self._format_session_tree(tree, include_statistics, indent)
+
+    def _format_session_tree(
+        self,
+        tree: Dict[str, Any],
+        include_statistics: bool,
+        indent: int
+    ) -> str:
+        """
+        格式化会话树为字符串
+
+        Args:
+            tree: 会话树字典
+            include_statistics: 是否包含统计信息
+            indent: 缩进层级
+
+        Returns:
+            格式化后的字符串
+        """
+        prefix = "  " * indent
+        lines = []
+
+        # 会话信息
+        session_id = tree['session_id']
+        metadata = tree['metadata']
+        statistics = tree.get('statistics', {})
+
+        # 标题行
+        instance_name = metadata.get('instance_name', 'unknown')
+        status = metadata.get('status', 'unknown')
+        lines.append(f"{prefix}[{session_id}] {instance_name} ({status})")
+
+        # 统计信息
+        if include_statistics:
+            num_messages = statistics.get('num_messages', 0)
+            num_tool_calls = statistics.get('num_tool_calls', 0)
+            duration_ms = statistics.get('total_duration_ms', 0)
+            lines.append(f"{prefix}  消息数: {num_messages}, 工具调用: {num_tool_calls}, 耗时: {duration_ms}ms")
+
+        # 递归打印子会话
+        subsessions = tree.get('subsessions', [])
+        if subsessions:
+            for sub_tree in subsessions:
+                lines.append(self._format_session_tree(sub_tree, include_statistics, indent + 1))
+
+        return "\n".join(lines)
+
+    def export_merged_messages(
+        self,
+        session_id: str,
+        output_file: Path,
+        format: str = "json",
+        include_subsessions: bool = True
+    ) -> None:
+        """
+        导出整合后的消息到文件
+
+        Args:
+            session_id: 会话 ID
+            output_file: 输出文件路径
+            format: 输出格式（json/jsonl/text）
+            include_subsessions: 是否包含子会话
+        """
+        session = self.get_session(session_id)
+
+        if format == "json":
+            # JSON 数组格式
+            messages = list(session.get_merged_messages(include_subsessions=include_subsessions))
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(messages, f, indent=2, ensure_ascii=False)
+
+        elif format == "jsonl":
+            # JSON Lines 格式
+            with open(output_file, 'w', encoding='utf-8') as f:
+                for msg in session.get_merged_messages(include_subsessions=include_subsessions):
+                    json.dump(msg, f, ensure_ascii=False)
+                    f.write('\n')
+
+        elif format == "text":
+            # 纯文本格式（易读）
+            with open(output_file, 'w', encoding='utf-8') as f:
+                for msg in session.get_merged_messages(include_subsessions=include_subsessions):
+                    indent = "  " * msg.get('indent_level', 0)
+                    f.write(f"{indent}[{msg['seq']}] {msg['message_type']} @ {msg['timestamp']}\n")
+
+                    # 简化显示消息内容
+                    if msg['message_type'] == "AssistantMessage":
+                        data = msg.get('data', {})
+                        content = data.get('content', [])
+                        for block in content:
+                            if block.get('type') == 'text':
+                                f.write(f"{indent}  {block['text'][:200]}\n")
+
+                    f.write("\n")
+
+        logger.info(f"已导出整合消息到: {output_file}")
 
     def cleanup(self):
         """

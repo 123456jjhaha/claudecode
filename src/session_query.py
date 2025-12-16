@@ -201,32 +201,6 @@ def search_sessions(
     return matched_sessions
 
 
-def get_call_graph(
-    instance_name: str,
-    session_id: str,
-    instances_root: Optional[Path] = None
-) -> Dict[str, Any]:
-    """
-    生成调用关系图
-
-    Args:
-        instance_name: 实例名称
-        session_id: 根会话 ID
-        instances_root: 实例根目录
-
-    Returns:
-        调用关系图字典
-
-    Raises:
-        AgentSystemError: 会话不存在或生成失败
-    """
-    instance_path = _get_instance_path(instance_name, instances_root)
-    session_manager = SessionManager(instance_path)
-
-    try:
-        return session_manager.generate_call_graph(session_id)
-    except Exception as e:
-        raise AgentSystemError(f"生成调用关系图失败: {e}")
 
 
 def get_session_statistics_summary(
@@ -521,12 +495,145 @@ def get_session_messages(
     return list(session.get_messages(message_types=message_types, limit=limit))
 
 
+def get_session_tree(
+    instance_name: str,
+    session_id: str,
+    instances_root: Optional[Path] = None
+) -> Dict[str, Any]:
+    """
+    获取会话树（包含所有子会话的层级结构）
+
+    Args:
+        instance_name: 实例名称
+        session_id: 主会话 ID
+        instances_root: 实例根目录
+
+    Returns:
+        会话树字典
+
+    Raises:
+        AgentSystemError: 会话不存在
+    """
+    instance_path = _get_instance_path(instance_name, instances_root)
+    session_manager = SessionManager(instance_path)
+
+    try:
+        return session_manager.get_session_tree(session_id)
+    except Exception as e:
+        raise AgentSystemError(f"获取会话树失败: {e}")
+
+
+def print_session_tree(
+    instance_name: str,
+    session_id: str,
+    include_statistics: bool = True,
+    instances_root: Optional[Path] = None
+) -> str:
+    """
+    打印会话树（树状格式）
+
+    Args:
+        instance_name: 实例名称
+        session_id: 主会话 ID
+        include_statistics: 是否包含统计信息
+        instances_root: 实例根目录
+
+    Returns:
+        树状格式的字符串
+
+    Raises:
+        AgentSystemError: 会话不存在
+    """
+    instance_path = _get_instance_path(instance_name, instances_root)
+    session_manager = SessionManager(instance_path)
+
+    try:
+        return session_manager.print_session_tree(session_id, include_statistics)
+    except Exception as e:
+        raise AgentSystemError(f"打印会话树失败: {e}")
+
+
+def get_merged_messages(
+    instance_name: str,
+    session_id: str,
+    include_subsessions: bool = True,
+    message_types: Optional[List[str]] = None,
+    instances_root: Optional[Path] = None
+) -> List[Dict[str, Any]]:
+    """
+    获取整合的消息（包括子会话）
+
+    Args:
+        instance_name: 实例名称
+        session_id: 会话 ID
+        include_subsessions: 是否包含子会话消息
+        message_types: 过滤消息类型
+        instances_root: 实例根目录
+
+    Returns:
+        整合后的消息列表
+
+    Raises:
+        AgentSystemError: 会话不存在
+    """
+    instance_path = _get_instance_path(instance_name, instances_root)
+    session_manager = SessionManager(instance_path)
+
+    try:
+        session = session_manager.get_session(session_id)
+        return list(session.get_merged_messages(
+            include_subsessions=include_subsessions,
+            message_types=message_types
+        ))
+    except Exception as e:
+        raise AgentSystemError(f"获取整合消息失败: {e}")
+
+
+def export_merged_messages(
+    instance_name: str,
+    session_id: str,
+    output_file: Path,
+    format: str = "json",
+    include_subsessions: bool = True,
+    instances_root: Optional[Path] = None
+) -> None:
+    """
+    导出整合后的消息到文件
+
+    Args:
+        instance_name: 实例名称
+        session_id: 会话 ID
+        output_file: 输出文件路径
+        format: 输出格式（json/jsonl/text）
+        include_subsessions: 是否包含子会话
+        instances_root: 实例根目录
+
+    Raises:
+        AgentSystemError: 导出失败
+    """
+    instance_path = _get_instance_path(instance_name, instances_root)
+    session_manager = SessionManager(instance_path)
+
+    try:
+        session_manager.export_merged_messages(
+            session_id,
+            output_file,
+            format=format,
+            include_subsessions=include_subsessions
+        )
+    except Exception as e:
+        raise AgentSystemError(f"导出整合消息失败: {e}")
+
+
 # 便捷别名
 get_details = get_session_details
 list_all = list_sessions
 search = search_sessions
-get_graph = get_call_graph
 get_summary = get_session_statistics_summary
 export = export_session
 cleanup = cleanup_sessions
 get_messages = get_session_messages
+get_tree = get_session_tree
+print_tree = print_session_tree
+get_merged = get_merged_messages
+export_merged = export_merged_messages
