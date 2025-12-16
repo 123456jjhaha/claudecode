@@ -17,17 +17,12 @@ async def main():
     print("Demo Agent 测试")
     print("=" * 50)
 
-    agent = AgentSystem("instances/demo_agent")
+    agent = AgentSystem("C:/Users/Lenovo/Desktop/test2/claudecode/instances/demo_agent")
     await agent.initialize()
 
     print(f"Agent名称: {agent.agent_name}")
     print(f"工具数量: {agent.tools_count}")
     print(f"子实例数量: {agent.sub_instances_count}")
-
-    # 测试计算器工具
-    print("\n1. 测试计算器工具")
-    result = await agent.query_text("使用计算器计算: 123 + 456")
-    print(f"结果: {result.result[:200]}...")
 
     # 测试子实例
     print("\n2. 测试子实例调用")

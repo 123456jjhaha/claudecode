@@ -118,12 +118,18 @@ class SubInstanceTool:
                     parent_session_id=parent_session_id  # ✅ 传递父会话 ID
                 )
 
-                # 返回字符串结果，并在末尾添加 session_id 标记
+                # 返回字典格式的结果
                 output = result.result
                 if result.session_id:
                     # 在结果末尾添加特殊标记
                     output += f"\n<!--SESSION_ID:{result.session_id}-->"
-                return output
+
+                # 返回字典格式（符合FastMCP期望）
+                return {
+                    "result": output,
+                    "session_id": result.session_id,
+                    "instance": self.instance_name
+                }
 
             finally:
                 # 清理资源
@@ -131,7 +137,12 @@ class SubInstanceTool:
 
         except Exception as e:
             logger.error(f"子实例 {self.instance_name} 执行失败: {e}")
-            return f"错误: {str(e)}\n<!--ERROR:{type(e).__name__}-->"
+            # 返回字典格式的错误信息
+            return {
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "instance": self.instance_name
+            }
 
 
 def create_sub_instance_tools(

@@ -1,0 +1,17 @@
+{
+  "session_id": "20251216T062137_2050_e2109aee",
+  "instance_name": "demo_agent",
+  "start_time": "2025-12-16T06:21:37.802050",
+  "end_time": null,
+  "status": "running",
+  "prompts": [
+    {
+      "prompt": "使用file_analyzer子实例分析 instances/demo_agent/config.yaml 文件",
+      "timestamp": "2025-12-16T06:21:37.802050"
+    }
+  ],
+  "results": [],
+  "depth": 0,
+  "parent_session_id": null,
+  "context": {}
+}
