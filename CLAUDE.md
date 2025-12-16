@@ -518,7 +518,11 @@ result = await agent.query_text(prompt)
 
 # 查询父会话的统计信息，可以获取子实例的 session_id
 parent_session_id = result.session_id
-session_details = agent.get_session_details(parent_session_id)
+from src.session.session_query import get_session_details
+session_details = get_session_details(
+    instance_name="parent_agent",
+    session_id=parent_session_id
+)
 print(session_details['statistics']['subsessions'])
 # [{"session_id": "...", "tool_name": "sub_claude_code_reviewer", ...}]
 ```
@@ -542,7 +546,6 @@ claude_agent_system/
 │   ├── sub_instance_adapter.py      # 子实例适配器
 │   ├── session/                     # 会话记录模块（独立模块）
 │   │   ├── __init__.py             # 模块接口
-│   │   ├── session_manager.py      # 会话管理器
 │   │   ├── session_utils.py        # 工具函数
 │   │   ├── session_serializer.py   # 消息序列化
 │   │   ├── session_query.py        # 查询 API

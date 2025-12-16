@@ -179,6 +179,85 @@ class ToolManager:
 
         return filtered
 
+    def collect_all_mcp_tool_names(self, sub_instance_tools: Optional[list] = None) -> List[str]:
+        """
+        收集所有 MCP 工具的完整名称
+
+        Args:
+            sub_instance_tools: 子实例工具列表
+
+        Returns:
+            所有 MCP 工具名称列表
+        """
+        all_tool_names = []
+
+        # 1. 收集本地自定义工具
+        local_tool_names = self.get_tool_names()
+        for tool_name in local_tool_names:
+            full_name = f"mcp__custom_tools__{tool_name}"
+            all_tool_names.append(full_name)
+        logger.debug(f"收集到 {len(local_tool_names)} 个本地工具")
+
+        # 2. 收集子实例工具（现在是主 MCP 服务器的一部分）
+        if sub_instance_tools:
+            for tool in sub_instance_tools:
+                full_name = f"mcp__custom_tools__{tool.name}"
+                all_tool_names.append(full_name)
+            logger.debug(f"收集到 {len(sub_instance_tools)} 个子实例工具")
+
+        logger.info(f"总共收集到 {len(all_tool_names)} 个 MCP 工具")
+        return all_tool_names
+
+    def expand_tool_permissions(
+        self,
+        options_dict: Dict[str, Any],
+        all_mcp_tool_names: List[str]
+    ) -> None:
+        """
+        展开工具权限配置中的通配符模式
+
+        Args:
+            options_dict: ClaudeAgentOptions 配置字典
+            all_mcp_tool_names: 所有 MCP 工具名称列表
+        """
+        from fnmatch import fnmatch
+
+        # 展开 allowed_tools
+        if "allowed_tools" in options_dict:
+            allowed_patterns = options_dict["allowed_tools"]
+            expanded_allowed = []
+
+            for pattern in allowed_patterns:
+                if "*" in pattern or "?" in pattern:
+                    # 通配符模式，需要展开
+                    matched = [name for name in all_mcp_tool_names if fnmatch(name, pattern)]
+                    expanded_allowed.extend(matched)
+                    logger.debug(f"通配符 '{pattern}' 匹配到 {len(matched)} 个工具")
+                else:
+                    # 具体工具名，直接添加
+                    expanded_allowed.append(pattern)
+
+            options_dict["allowed_tools"] = expanded_allowed
+            logger.info(f"展开后的 allowed_tools 包含 {len(expanded_allowed)} 个工具")
+
+        # 展开 disallowed_tools
+        if "disallowed_tools" in options_dict:
+            disallowed_patterns = options_dict["disallowed_tools"]
+            expanded_disallowed = []
+
+            for pattern in disallowed_patterns:
+                if "*" in pattern or "?" in pattern:
+                    # 通配符模式，需要展开
+                    matched = [name for name in all_mcp_tool_names if fnmatch(name, pattern)]
+                    expanded_disallowed.extend(matched)
+                    logger.debug(f"通配符 '{pattern}' 匹配到 {len(matched)} 个工具")
+                else:
+                    # 具体工具名，直接添加
+                    expanded_disallowed.append(pattern)
+
+            options_dict["disallowed_tools"] = expanded_disallowed
+            logger.info(f"展开后的 disallowed_tools 包含 {len(expanded_disallowed)} 个工具")
+
     @property
     def tools_count(self) -> int:
         """获取工具数量"""
