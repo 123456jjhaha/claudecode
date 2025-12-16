@@ -1,0 +1,17 @@
+{
+  "session_id": "20251216T061542_3535_3531974e",
+  "instance_name": "demo_agent",
+  "start_time": "2025-12-16T06:15:42.473535",
+  "end_time": null,
+  "status": "running",
+  "prompts": [
+    {
+      "prompt": "\n    请使用计算器工具计算以下内容：\n    - 123 + 456\n    - 789 * 10\n    - 100 - 50\n    ",
+      "timestamp": "2025-12-16T06:15:42.473535"
+    }
+  ],
+  "results": [],
+  "depth": 0,
+  "parent_session_id": null,
+  "context": {}
+}

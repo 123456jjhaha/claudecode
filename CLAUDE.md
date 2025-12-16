@@ -437,6 +437,41 @@ await agent.initialize()
 - 实现异步迭代器协议，可使用 `async for` 遍历
 - 包含 `session_id` 属性
 
+### ConfigManager
+
+配置管理器，统一处理所有配置相关功能（重构后的核心组件）。
+
+**初始化**：
+```python
+from src.config_manager import ConfigManager
+
+manager = ConfigManager("instances/demo_agent")
+```
+
+**主要方法**：
+- `load_config() -> dict[str, Any]` - 加载并验证主配置文件
+- `load_mcp_config() -> dict[str, dict[str, Any]]` - 加载MCP服务器配置
+- `validate_config(config: dict[str, Any]) -> None` - 验证配置结构
+- `resolve_path(path: str) -> Path` - 解析路径（相对或绝对）
+- `get_claude_options_dict() -> dict[str, Any]` - 生成Claude SDK配置参数
+
+**属性**：
+- `config` - 获取已加载的配置字典
+- `agent_name` - Agent名称
+- `agent_description` - Agent描述
+- `mcp_config` - 获取已加载的MCP配置
+
+**便捷函数**：
+```python
+from src.config_manager import load_mcp_config, merge_mcp_configs
+
+# 加载MCP配置（无需实例化）
+mcp_config = load_mcp_config("instances/demo_agent")
+
+# 合并SDK和外部MCP服务器配置
+merged = merge_mcp_configs(sdk_servers, external_servers)
+```
+
 ### Session 模块
 
 会话记录相关功能已独立成 `src.session` 模块，提供：
@@ -541,12 +576,12 @@ print(session_details['statistics']['subsessions'])
 claude_agent_system/
 ├── src/                              # 核心框架
 │   ├── agent_system.py              # 系统主类
-│   ├── config_loader.py             # 配置加载
+│   ├── config_manager.py            # 配置管理（统一管理）
 │   ├── tool_manager.py              # 工具管理
 │   ├── sub_instance_adapter.py      # 子实例适配器
 │   ├── session/                     # 会话记录模块（独立模块）
 │   │   ├── __init__.py             # 模块接口
-│   │   ├── session_utils.py        # 工具函数
+│   │   ├── session_utils.py        # 工具函数和数据类
 │   │   ├── session_serializer.py   # 消息序列化
 │   │   ├── session_query.py        # 查询 API
 │   │   ├── session_context.py      # 上下文管理
@@ -573,6 +608,7 @@ claude_agent_system/
 ├── requirements.txt
 └── MCP_MIGRATION_WORK_LOG.md        # 迁移工作记录
 ```
+
 
 ## 常见问题
 

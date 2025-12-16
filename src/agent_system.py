@@ -11,9 +11,8 @@ from datetime import datetime
 from dataclasses import dataclass
 from claude_agent_sdk import query, ClaudeAgentOptions, SystemMessage, UserMessage
 
-from .config_loader import AgentConfigLoader
+from .config_manager import ConfigManager, merge_mcp_configs
 from .tool_manager import ToolManager
-from .mcp_config_loader import load_mcp_config, merge_mcp_configs
 from .sub_instance_adapter import create_sub_instance_tools
 from .error_handling import AgentSystemError
 from .logging_config import get_logger
@@ -100,7 +99,7 @@ class AgentSystem:
         logger.info(f"初始化 Agent 系统: {self.instance_path}")
 
         # 组件
-        self.config_loader: AgentConfigLoader | None = None
+        self.config_loader: ConfigManager | None = None
         self.tool_manager: ToolManager | None = None
         self.sub_instance_tools: list = None
 
@@ -130,8 +129,8 @@ class AgentSystem:
         try:
             # 1. 加载配置
             logger.info("加载配置...")
-            self.config_loader = AgentConfigLoader(self.instance_path)
-            self._config = self.config_loader.load()
+            self.config_loader = ConfigManager(self.instance_path)
+            self._config = self.config_loader.load_config()
             options_dict = self.config_loader.get_claude_options_dict()
 
             # 2. 发现本地工具（只发现，用于统计）
@@ -166,7 +165,7 @@ class AgentSystem:
             logger.info("合并 MCP 服务器配置...")
 
             # 6.1 读取 .mcp.json 文件中的外部 MCP 服务器配置
-            external_mcp_servers = load_mcp_config(self.instance_path)
+            external_mcp_servers = self.config_loader.load_mcp_config()
 
             # 6.2 准备内部 MCP 服务器配置
             internal_mcp_servers = {}
@@ -239,20 +238,20 @@ class AgentSystem:
         try:
             # 准备查询选项
             query_options = self._options
-            if not record_session:
-                # 禁用会话记录
-                query_options = query_options.with_record_session(False)
-
-            # 如果有 resume_session_id，需要恢复会话
+            # 如果有 resume_session_id，需要提取Claude的session_id并恢复会话
             if resume_session_id:
-                query_options = query_options.with_resume(resume_session_id)
+                claude_session_id = self.session_manager.get_claude_session_id(resume_session_id)
+                if claude_session_id:
+                    query_options.resume = claude_session_id
+                    logger.info(f"恢复Claude会话: {claude_session_id} (本地session: {resume_session_id})")
+                else:
+                    logger.warning(f"未找到Claude session_id for local session: {resume_session_id}")
 
             # 执行查询
             stream = query(
                 prompt=prompt,
                 options=query_options
             )
-
             # 创建查询流管理器
             stream_manager = QueryStreamManager(
                 stream=stream,

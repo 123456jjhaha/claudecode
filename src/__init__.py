@@ -10,10 +10,9 @@ __version__ = "1.0.0"
 from .agent_system import AgentSystem, QueryResult, QueryStream
 
 # 导出核心组件
-from .config_loader import AgentConfigLoader
+from .config_manager import ConfigManager, merge_mcp_configs
 from .tool_manager import ToolManager
 from .sub_instance_adapter import SubInstanceTool, create_sub_instance_tools
-from .mcp_config_loader import load_mcp_config, merge_mcp_configs
 
 # 导出错误类
 from .error_handling import (
@@ -37,11 +36,10 @@ __all__ = [
     "QueryResult",
     "QueryStream",
     # 核心组件
-    "AgentConfigLoader",
+    "ConfigManager",
     "ToolManager",
     "SubInstanceTool",
     "create_sub_instance_tools",
-    "load_mcp_config",
     "merge_mcp_configs",
     # 错误类
     "AgentSystemError",

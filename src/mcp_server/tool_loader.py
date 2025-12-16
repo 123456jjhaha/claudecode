@@ -215,12 +215,12 @@ def load_sub_instance_tools(instance_path: Path) -> List[Any]:
                 sys.path.insert(0, path)
 
         # 使用绝对导入
-        from src.config_loader import AgentConfigLoader
+        from src.config_manager import ConfigManager
         from src.sub_instance_adapter import SubInstanceTool
 
         # 读取配置文件
-        config_loader = AgentConfigLoader(instance_path)
-        config = config_loader.load()
+        config_manager = ConfigManager(instance_path)
+        config = config_manager.load_config()
 
         # 提取子实例配置
         sub_instances_config = config.get("sub_claude_instances", {})

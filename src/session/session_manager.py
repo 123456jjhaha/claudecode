@@ -511,6 +511,61 @@ class SessionManager:
 
         return session
 
+    def get_claude_session_id(self, local_session_id: str) -> Optional[str]:
+        """
+        从本地会话记录中提取Claude的session_id
+
+        Args:
+            local_session_id: 我们的session_id (格式: 20251216T051526_5440_021abcf7)
+
+        Returns:
+            Claude的session_id (UUID格式) 或 None
+        """
+        try:
+            import json
+
+            # 构建会话目录路径
+            session_dir = self.sessions_dir / local_session_id
+            if not session_dir.exists():
+                logger.error(f"会话目录不存在: {session_dir}")
+                return None
+
+            # 读取messages.jsonl文件
+            messages_file = session_dir / "messages.jsonl"
+            if not messages_file.exists():
+                logger.error(f"会话消息文件不存在: {messages_file}")
+                return None
+
+            # 查找第一个包含session_id的SystemMessage
+            with open(messages_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        message_data = json.loads(line)
+                        message_type = message_data.get("message_type")
+                        data = message_data.get("data", {})
+
+                        # 查找SystemMessage或ResultMessage中的session_id
+                        if message_type in ["SystemMessage", "ResultMessage"]:
+                            claude_session_id = data.get("session_id")
+                            if claude_session_id:
+                                logger.debug(f"找到Claude session_id: {claude_session_id}")
+                                return claude_session_id
+
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"解析消息行失败: {e}")
+                        continue
+
+            logger.warning(f"在会话 {local_session_id} 中未找到Claude session_id")
+            return None
+
+        except Exception as e:
+            logger.error(f"提取Claude session_id失败: {e}")
+            return None
+
     def list_sessions(
         self,
         status: Optional[str] = None,

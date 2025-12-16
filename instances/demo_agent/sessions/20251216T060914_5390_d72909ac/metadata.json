@@ -1,0 +1,17 @@
+{
+  "session_id": "20251216T060914_5390_d72909ac",
+  "instance_name": "demo_agent",
+  "start_time": "2025-12-16T06:09:14.975414",
+  "end_time": null,
+  "status": "running",
+  "prompts": [
+    {
+      "prompt": "你好，请介绍你自己和你的功能",
+      "timestamp": "2025-12-16T06:09:14.975417"
+    }
+  ],
+  "results": [],
+  "depth": 0,
+  "parent_session_id": null,
+  "context": {}
+}

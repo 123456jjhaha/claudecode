@@ -40,3 +40,28 @@ async def multiply(a: float, b: float) -> dict:
         "operands": [a, b],
         "result": result
     }
+
+async def divide(a: float, b: float) -> dict:
+    """
+    计算两个数字的除法
+
+    Args:
+        a: 被除数
+        b: 除数
+
+    Returns:
+        计算结果
+    """
+    if b == 0:
+        return {
+            "operation": "divide",
+            "operands": [a, b],
+            "result": None,
+            "error": "除数不能为零"
+        }
+    result = a / b
+    return {
+        "operation": "divide",
+        "operands": [a, b],
+        "result": result
+    }

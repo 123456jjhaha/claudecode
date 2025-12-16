@@ -34,9 +34,9 @@ class SubInstanceTool:
 
         # 从配置中读取描述
         try:
-            from .config_loader import AgentConfigLoader
-            config_loader = AgentConfigLoader(self.instance_path)
-            config = config_loader.load()
+            from .config_manager import ConfigManager
+            config_loader = ConfigManager(self.instance_path)
+            config = config_loader.load_config()
             self._description = config.get("agent", {}).get("description", f"调用 {instance_name} 子实例")
         except Exception as e:
             logger.warning(f"加载子实例 {instance_name} 配置失败: {e}")
