@@ -11,6 +11,7 @@
 - ⚡ **无状态设计** - 支持并发查询，线程安全
 - 📊 **智能会话记录** - 自动记录所有对话，支持层级化存储和查询
 - 🔁 **Resume 多轮对话** - 支持恢复之前的会话
+- 🧩 **模块化架构** - 会话记录功能独立模块，便于维护和扩展
 
 ## 核心设计理念
 
@@ -93,7 +94,8 @@ results = await asyncio.gather(task1, task2)
 - 实现 `__call__` 方法，可直接被调用
 - 延迟实例化：只在被调用时才创建 `AgentSystem`
 - 自动清理：调用完成后自动 `cleanup()`
-- 嵌套会话：子实例的会话自动记录到 `subsessions/` 目录
+- 独立会话：子实例的会话记录在子实例自己的 `sessions/` 目录下
+- 自动追踪：父实例自动追踪子实例的 `session_id` 并记录到统计信息中
 
 ### 5. 会话记录系统
 
@@ -109,37 +111,51 @@ results = await asyncio.gather(task1, task2)
 - 示例：`20251211T061755_0001_a3f9c2d8`
 - 保证唯一性和可排序性
 
-**层级化存储**：
+**目录结构**：
 ```
-instances/agent_name/sessions/
-└── 20251211T061755_0001_a3f9c2d8/      # 父会话
-    ├── metadata.json                    # 会话元数据
-    ├── messages.jsonl                   # 消息记录（JSON Lines）
-    ├── statistics.json                  # 统计信息
-    └── subsessions/                     # 子会话目录
-        └── 20251211T061800_0001_b4e8d3f9/  # 子会话
+instances/
+├── parent_agent/sessions/
+│   └── 20251211T061755_0001_a3f9c2d8/      # 父实例会话
+│       ├── metadata.json                    # 会话元数据
+│       ├── messages.jsonl                   # 消息记录（JSON Lines）
+│       └── statistics.json                  # 统计信息（包含子会话追踪）
+│
+└── child_agent/sessions/
+    └── 20251211T061800_0001_b4e8d3f9/      # 子实例会话（独立存储）
+        ├── metadata.json
+        ├── messages.jsonl
+        └── statistics.json
 ```
+
+**说明**：
+- 每个实例的会话存储在自己的 `instances/{instance_name}/sessions/` 目录下
+- 子实例会话不嵌套在父会话目录中（因为 MCP 子进程隔离）
+- 父实例的 `statistics.json` 记录所有调用过的子实例的 `session_id`
 
 **✨ 子实例 Session 自动追踪**：
 
-系统会自动检测并记录子实例的 session_id，无需手动配置：
+系统会自动检测并记录子实例的 session_id，实现父子会话关联：
 
-1. **自动提取**：当检测到子实例工具调用时，自动从返回结果中提取 `session_id`
-2. **关联记录**：将子实例 session_id 保存到父会话的统计信息中
-3. **完整追踪**：支持递归追踪多层嵌套的子实例调用
+1. **自动提取**：子实例在返回结果时自动嵌入 `<!--SESSION_ID:xxx-->` 标记
+2. **智能检测**：父实例检测到子实例工具调用时，自动解析 session_id
+3. **关联记录**：将子实例 session_id 保存到父会话的 `statistics.json` 中
+4. **完整追踪**：支持递归追踪多层嵌套的子实例调用链
 
 ```python
-# 使用子实例后，statistics.json 自动包含：
+# 父会话的 statistics.json 自动包含：
 {
   "subsessions": [
     {
-      "session_id": "20251211T061800_0001_b4e8d3f9",
+      "session_id": "20251211T061800_0001_b4e8d3f9",  # 子实例的会话 ID
       "tool_name": "mcp__custom_tools__sub_claude_file_analyzer",
       "tool_use_id": "toolu_abc123",
       "timestamp": "2025-12-14T10:30:00"
     }
   ]
 }
+
+# 通过 session_id 可以查询子实例的完整会话记录：
+# instances/file_analyzer_agent/sessions/20251211T061800_0001_b4e8d3f9/
 ```
 
 ### 6. 延迟实例化
@@ -370,7 +386,6 @@ advanced:
 
 支持通配符 `*` 进行模式匹配。
 
-
 ## API 文档
 
 ### AgentSystem
@@ -388,12 +403,14 @@ await agent.initialize()
 
 **方法**：
 
-- `async query(prompt: str, record_session: bool = True, resume_session_id: Optional[str] = None) -> QueryStream`
+- `async query(prompt: str, record_session: bool = True, resume_session_id: Optional[str] = None, parent_session_id: Optional[str] = None) -> QueryStream`
   - 返回可迭代的 QueryStream 对象
   - 包含 `session_id` 属性
+  - `parent_session_id` 用于子实例调用，标识父会话
 
-- `async query_text(prompt: str, record_session: bool = True, resume_session_id: Optional[str] = None) -> QueryResult`
+- `async query_text(prompt: str, record_session: bool = True, resume_session_id: Optional[str] = None, parent_session_id: Optional[str] = None) -> QueryResult`
   - 返回 QueryResult 对象（包含 `result` 和 `session_id`）
+  - `parent_session_id` 用于子实例调用，标识父会话
 
 - `cleanup()` - 清理资源，停止 MCP 服务器
 
@@ -419,6 +436,29 @@ await agent.initialize()
 **特性**：
 - 实现异步迭代器协议，可使用 `async for` 遍历
 - 包含 `session_id` 属性
+
+### Session 模块
+
+会话记录相关功能已独立成 `src.session` 模块，提供：
+
+**核心类**：
+- `SessionManager` - 会话管理器
+- `Session` - 单个会话对象
+- `QueryStreamManager` - 查询流管理器
+- `SessionContext` - 会话上下文管理器
+
+**工具函数**：
+- `generate_session_id()` - 生成唯一会话 ID
+- `Statistics` - 会话统计数据类
+
+**序列化**：
+- `MessageSerializer` - 消息序列化器
+
+**查询 API**：
+- `get_session_details()` - 获取会话详情
+- `list_sessions()` - 列出会话
+- `search_sessions()` - 搜索会话
+- `export_session()` - 导出会话
 
 ## 子实例（高级特性）
 
@@ -475,11 +515,17 @@ prompt = """
 """
 
 result = await agent.query_text(prompt)
-# 子实例的会话自动记录到 subsessions/ 目录
+
+# 查询父会话的统计信息，可以获取子实例的 session_id
+parent_session_id = result.session_id
+session_details = agent.get_session_details(parent_session_id)
+print(session_details['statistics']['subsessions'])
+# [{"session_id": "...", "tool_name": "sub_claude_code_reviewer", ...}]
 ```
 
 **SubInstanceTool 工具参数**：
 - `task` - 任务描述
+- `parent_session_id` - **必填**，父会话 ID（用于追踪）
 - `context_files` - 相关文件列表
 - `output_format` - 输出格式（text/json/markdown）
 - `resume_session_id` - 要恢复的子会话 ID
@@ -494,11 +540,20 @@ claude_agent_system/
 │   ├── config_loader.py             # 配置加载
 │   ├── tool_manager.py              # 工具管理
 │   ├── sub_instance_adapter.py      # 子实例适配器
-│   ├── session_manager.py           # 会话管理
+│   ├── session/                     # 会话记录模块（独立模块）
+│   │   ├── __init__.py             # 模块接口
+│   │   ├── session_manager.py      # 会话管理器
+│   │   ├── session_utils.py        # 工具函数
+│   │   ├── session_serializer.py   # 消息序列化
+│   │   ├── session_query.py        # 查询 API
+│   │   ├── session_context.py      # 上下文管理
+│   │   └── stream_manager.py       # 流管理
 │   ├── mcp_server/                  # FastMCP 服务器
 │   │   ├── server.py                # 服务器主逻辑
 │   │   ├── tool_loader.py           # 工具加载器
 │   │   └── process_manager.py       # 进程管理
+│   ├── error_handling.py            # 错误处理
+│   ├── logging_config.py            # 日志配置
 │   └── __init__.py
 │
 ├── instances/                        # 实例目录
@@ -563,6 +618,10 @@ result2 = await agent.query_text(
     resume_session_id=result1.session_id
 )
 ```
+
+**Q: 子实例调用为什么要传递 parent_session_id？**
+
+用于追踪父子会话关系，实现会话层级记录和查询。这是**必填参数**，确保会话记录的完整性。
 
 ### 系统提示词
 

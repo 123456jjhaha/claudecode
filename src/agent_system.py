@@ -17,8 +17,7 @@ from .mcp_config_loader import load_mcp_config, merge_mcp_configs
 from .sub_instance_adapter import create_sub_instance_tools
 from .error_handling import AgentSystemError
 from .logging_config import get_logger
-from .stream_manager import QueryStreamManager
-from .session_manager import SessionManager
+from .session import QueryStreamManager, SessionManager
 
 logger = get_logger(__name__)
 
@@ -300,7 +299,8 @@ class AgentSystem:
         self,
         prompt: str,
         record_session: bool = True,
-        resume_session_id: Optional[str] = None
+        resume_session_id: Optional[str] = None,
+        parent_session_id: Optional[str] = None
     ) -> QueryStream:
         """
         执行查询（支持会话记录和 resume）
@@ -309,13 +309,15 @@ class AgentSystem:
             prompt: 查询提示词
             record_session: 是否记录会话到文件
             resume_session_id: 要恢复的会话 ID（我们的本地 session_id）
+            parent_session_id: 父会话 ID（用于子实例调用时建立父子关系）
+                **重要**：MCP 子实例调用时必须传递此参数
 
         Returns:
             QueryStream 对象（可迭代，包含 session_id）
         """
         require_initialized(self)
 
-        logger.info(f"执行查询... (record_session={record_session}, resume={resume_session_id})")
+        logger.info(f"执行查询... (record_session={record_session}, resume={resume_session_id}, parent={parent_session_id})")
 
         try:
             # 准备查询选项
@@ -340,7 +342,8 @@ class AgentSystem:
                 session_manager=self.session_manager,
                 record_session=record_session,
                 prompt=prompt,
-                resume_session_id=resume_session_id
+                resume_session_id=resume_session_id,
+                parent_session_id=parent_session_id  # 传递父会话 ID
             )
 
             # 初始化 session（创建或恢复会话）
@@ -363,7 +366,8 @@ class AgentSystem:
         self,
         prompt: str,
         record_session: bool = True,
-        resume_session_id: Optional[str] = None
+        resume_session_id: Optional[str] = None,
+        parent_session_id: Optional[str] = None
     ) -> QueryResult:
         """
         执行查询并返回结果
@@ -372,6 +376,7 @@ class AgentSystem:
             prompt: 查询提示词
             record_session: 是否记录会话到文件
             resume_session_id: 要恢复的会话 ID
+            parent_session_id: 父会话 ID（用于子实例调用）
 
         Returns:
             QueryResult 对象（包含结果和 session_id）
@@ -379,7 +384,8 @@ class AgentSystem:
         stream = await self.query(
             prompt=prompt,
             record_session=record_session,
-            resume_session_id=resume_session_id
+            resume_session_id=resume_session_id,
+            parent_session_id=parent_session_id
         )
 
         # 收集所有消息，构建结果
@@ -423,7 +429,7 @@ class AgentSystem:
         if self.session_manager is None:
             return None
 
-        from .session_query import get_session_details
+        from .session.session_query import get_session_details
         return get_session_details(
             instance_name=self.agent_name,
             session_id=session_id
@@ -448,7 +454,7 @@ class AgentSystem:
         if self.session_manager is None:
             return []
 
-        from .session_query import list_sessions
+        from .session.session_query import list_sessions
         return list_sessions(
             instance_name=self.agent_name,
             limit=limit,
@@ -476,7 +482,7 @@ class AgentSystem:
         if self.session_manager is None:
             return []
 
-        from .session_query import search_sessions
+        from .session.session_query import search_sessions
         return search_sessions(
             instance_name=self.agent_name,
             query=query,
@@ -509,20 +515,6 @@ class AgentSystem:
         if self.sub_instance_tools is None:
             return 0
         return len(self.sub_instance_tools)
-
-    @property
-    def session_id(self) -> Optional[str]:
-        """
-        获取当前会话 ID（仅向后兼容）
-
-        注意：AgentSystem 现在是无状态的，每个查询都有独立的 session_id。
-        请从 QueryResult 或 QueryStream 中获取 session_id。
-        """
-        logger.warning(
-            "AgentSystem.session_id 已过时。系统现在是无状态的，"
-            "请从 QueryResult 或 QueryStream 中获取 session_id。"
-        )
-        return None
 
     def cleanup(self):
         """

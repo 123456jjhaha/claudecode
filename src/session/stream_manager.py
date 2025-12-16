@@ -8,12 +8,30 @@
 """
 
 from typing import Any, Optional
-from contextvars import Token
+from contextvars import ContextVar, Token
 
-from .session_context import set_current_session, reset_current_session
-from .logging_config import get_logger
+from ..logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# 全局上下文变量：存储当前会话（仅用于 stream_manager 内部）
+_current_session_context: ContextVar[Optional['Any']] = ContextVar(
+    'current_session',
+    default=None
+)
+
+
+def set_current_session(session: Optional['Any']) -> Token:
+    """设置当前会话上下文"""
+    token = _current_session_context.set(session)
+    logger.debug(f"[StreamManager] Set session: session_id={session.session_id if session else None}")
+    return token
+
+
+def reset_current_session(token: Token) -> None:
+    """恢复之前的会话上下文"""
+    _current_session_context.reset(token)
+    logger.debug("[StreamManager] Reset session")
 
 
 class QueryStreamManager:
@@ -30,7 +48,8 @@ class QueryStreamManager:
         session_manager: Optional[Any] = None,
         record_session: bool = True,
         prompt: Optional[str] = None,
-        resume_session_id: Optional[str] = None
+        resume_session_id: Optional[str] = None,
+        parent_session_id: Optional[str] = None
     ):
         """
         初始化流管理器
@@ -41,12 +60,14 @@ class QueryStreamManager:
             record_session: 是否记录会话
             prompt: 查询提示词（用于创建新会话）
             resume_session_id: 要恢复的会话 ID
+            parent_session_id: 父会话 ID（用于子实例调用）
         """
         self.stream = stream
         self.session_manager = session_manager
         self.record_session = record_session
         self.prompt = prompt
         self.resume_session_id = resume_session_id
+        self.parent_session_id = parent_session_id
         self.session = None  # 实际的 Session 对象
         self._finalized = False  # 防止双重 finalize
         self._context_token: Optional[Token] = None  # 保存上下文令牌
@@ -75,9 +96,10 @@ class QueryStreamManager:
                 # 创建新会话
                 self.session = await self.session_manager.create_session(
                     initial_prompt=self.prompt or "",
-                    context={}
+                    context={},
+                    parent_session_id=self.parent_session_id  # 传递父会话 ID
                 )
-                logger.info(f"[StreamManager] Created new session: {self.session.session_id}")
+                logger.info(f"[StreamManager] Created new session: {self.session.session_id}, parent: {self.parent_session_id}")
 
             self._initialized = True
 

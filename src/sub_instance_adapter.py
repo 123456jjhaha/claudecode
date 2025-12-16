@@ -49,6 +49,7 @@ class SubInstanceTool:
     async def __call__(
         self,
         task: str,
+        parent_session_id: str,
         context_files: Optional[List[str]] = None,
         output_format: str = "text",
         resume_session_id: Optional[str] = None,
@@ -59,9 +60,12 @@ class SubInstanceTool:
 
         Args:
             task: 任务描述
+            parent_session_id: 父会话 ID（必填）
+                **重要**：调用子实例时必须传递当前的 session_id，
+                以便建立父子会话的关联关系
             context_files: 相关文件列表
             output_format: 输出格式（text/json/markdown）
-            resume_session_id: 要恢复的会话 ID
+            resume_session_id: 要恢复的子会话 ID
             variables: 变量字典
 
         Returns:
@@ -107,10 +111,11 @@ class SubInstanceTool:
                 # 组合提示词
                 prompt = "\n".join(prompt_parts)
 
-                # 执行查询
+                # 执行查询（传递 parent_session_id）
                 result = await agent.query_text(
                     prompt=prompt,
-                    resume_session_id=resume_session_id
+                    resume_session_id=resume_session_id,
+                    parent_session_id=parent_session_id  # ✅ 传递父会话 ID
                 )
 
                 # 返回字符串结果，并在末尾添加 session_id 标记
