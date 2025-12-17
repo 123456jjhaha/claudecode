@@ -7,16 +7,23 @@
 - 搜索会话
 - 统计摘要
 - 导出会话
+- 实时订阅消息（新增）
 """
 
 import json
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, AsyncIterator
 from datetime import datetime
 
-from .session_manager import SessionManager
-from ..error_handling import AgentSystemError
-from ..logging_config import get_logger
+from ..core.session_manager import SessionManager
+from ...error_handling import AgentSystemError
+from ...logging_config import get_logger
+
+# 新增：导入 MessageBus 类型
+try:
+    from ..streaming.message_bus import MessageBus
+except ImportError:
+    MessageBus = None
 
 logger = get_logger(__name__)
 
@@ -471,6 +478,83 @@ def get_session_messages(
 
     except Exception as e:
         raise AgentSystemError(f"获取会话消息失败: {e}")
+
+
+# =====================================================
+# 实时订阅 API（新增）
+# =====================================================
+
+async def subscribe_session_messages(
+    session_id: str,
+    message_bus: "MessageBus"
+) -> AsyncIterator[Dict[str, Any]]:
+    """
+    订阅特定会话的实时消息流
+
+    Args:
+        session_id: 会话 ID
+        message_bus: MessageBus 实例
+
+    Yields:
+        消息事件字典，格式：
+        {
+            "event_type": "message_created",
+            "timestamp": "2025-12-16T10:30:00",
+            "instance_name": "demo_agent",
+            "session_id": "xxx",
+            "parent_session_id": "yyy",
+            "depth": 0,
+            "seq": 42,
+            "message_type": "AssistantMessage",
+            "data": {...}
+        }
+
+    Raises:
+        AgentSystemError: MessageBus 未连接
+    """
+    if not message_bus or not message_bus.is_connected:
+        raise AgentSystemError("MessageBus 未连接，无法订阅实时消息")
+
+    channel = f"messages:session:{session_id}"
+    logger.info(f"订阅会话消息: {session_id}")
+
+    try:
+        async for event in message_bus.subscribe(channel):
+            yield event
+    except Exception as e:
+        logger.error(f"订阅会话消息失败: {e}")
+        raise AgentSystemError(f"订阅会话消息失败: {e}")
+
+
+async def subscribe_instance_messages(
+    instance_name: str,
+    message_bus: "MessageBus"
+) -> AsyncIterator[Dict[str, Any]]:
+    """
+    订阅特定实例的所有实时消息
+
+    Args:
+        instance_name: 实例名称
+        message_bus: MessageBus 实例
+
+    Yields:
+        消息事件字典（格式同 subscribe_session_messages）
+
+    Raises:
+        AgentSystemError: MessageBus 未连接
+    """
+    if not message_bus or not message_bus.is_connected:
+        raise AgentSystemError("MessageBus 未连接，无法订阅实时消息")
+
+    channel = f"messages:instance:{instance_name}"
+    logger.info(f"订阅实例消息: {instance_name}")
+
+    try:
+        async for event in message_bus.subscribe(channel):
+            yield event
+    except Exception as e:
+        logger.error(f"订阅实例消息失败: {e}")
+        raise AgentSystemError(f"订阅实例消息失败: {e}")
 
 
 # 简化别名

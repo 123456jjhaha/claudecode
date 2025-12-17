@@ -5,7 +5,7 @@ Agent 系统主类
 """
 
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional, List, Dict
+from typing import Any, AsyncIterator, Optional, List, Dict, TYPE_CHECKING
 from functools import wraps
 from datetime import datetime
 from dataclasses import dataclass
@@ -17,6 +17,10 @@ from .sub_instance_adapter import create_sub_instance_tools
 from .error_handling import AgentSystemError
 from .logging_config import get_logger
 from .session import QueryStreamManager, SessionManager
+
+# 新增：导入 MessageBus 类型（用于类型注解）
+if TYPE_CHECKING:
+    from .session.streaming.message_bus import MessageBus
 
 logger = get_logger(__name__)
 
@@ -68,7 +72,8 @@ class AgentSystem:
     def __init__(
         self,
         instance_name: str,
-        instances_root: Path | None = None
+        instances_root: Path | None = None,
+        message_bus: Optional["MessageBus"] = None  # 新增参数（可选）
     ):
         """
         初始化 Agent 系统
@@ -76,6 +81,7 @@ class AgentSystem:
         Args:
             instance_name: 实例名称或实例目录路径
             instances_root: 实例根目录（默认为当前目录下的 instances/）
+            message_bus: 消息总线（可选，用于实时消息推送）
         Raises:
             AgentSystemError: 初始化失败
         """
@@ -95,6 +101,9 @@ class AgentSystem:
             raise AgentSystemError(f"实例目录不存在: {self.instance_path}")
 
         self.instances_root = self.instance_path.parent
+
+        # 新增：保存 MessageBus 引用（不创建）
+        self._message_bus = message_bus
 
         logger.info(f"初始化 Agent 系统: {self.instance_path}")
 
@@ -192,11 +201,12 @@ class AgentSystem:
                 options_dict["mcp_servers"] = all_mcp_servers
                 logger.info(f"配置了 {len(all_mcp_servers)} 个 MCP 服务器")
 
-            # 9. 创建会话管理器
+            # 9. 创建会话管理器（传递 MessageBus）
             logger.info("初始化会话记录...")
             self.session_manager = SessionManager(
                 instance_path=self.instance_path,
-                config=session_recording_config
+                config=session_recording_config,
+                message_bus=self._message_bus  # 传递 MessageBus（可能为 None）
             )
 
             # 10. 创建 ClaudeAgentOptions

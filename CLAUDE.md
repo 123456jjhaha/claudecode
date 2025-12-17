@@ -1,6 +1,8 @@
 # Claude Agent System
 
-基于 Claude Agent SDK (Python) 的可扩展智能体系统，使用 FastMCP + stdio 架构，提供完整的会话记录和管理功能。
+基于 Claude Agent SDK (Python) 的可扩展智能体系统，使用 FastMCP + stdio 架构，提供完整的会话记录和实时消息功能。
+
+> **重要提示**：本文档是系统的核心架构文档。如需了解各组件的详细实现和使用方法，请查看文末的[文档索引](#文档索引)中的对应文档。
 
 ## 核心特性
 
@@ -11,218 +13,276 @@
 - ⚡ **无状态设计** - 支持并发查询，线程安全
 - 📊 **智能会话记录** - 自动记录所有对话，支持层级化存储和查询
 - 🔁 **Resume 多轮对话** - 支持恢复之前的会话
-- 🧩 **模块化架构** - 会话记录功能独立模块，便于维护和扩展
+- 🚀 **实时消息推送** - 基于 Redis Pub/Sub，延迟 < 100ms
+- 🧩 **模块化架构** - 清晰的模块化设计，便于维护和扩展
 
 ## 核心设计理念
 
 ### 1. FastMCP + stdio 架构
 
-**为什么使用 FastMCP**：
-- ✅ **进程隔离**：MCP 服务器运行在独立子进程中，工具崩溃不影响主进程
-- ✅ **标准协议**：使用 JSON-RPC over stdio，符合 MCP 规范
-- ✅ **更高稳定性**：避免 SDK 本地工具系统的 bug 和限制
+**进程隔离**：MCP 服务器运行在独立子进程中，工具崩溃不影响主进程。使用 JSON-RPC over stdio 通信，符合 MCP 规范，提供更高的稳定性。
 
-**通信流程**：
 ```
 Claude SDK → stdio → MCP 服务器子进程 → 工具执行 → 结果返回
 ```
 
-**架构图**：
-```
-AgentSystem
-  └─ ToolManager
-      └─ ProcessManager (管理子进程)
-          └─ FastMCP Server (独立子进程)
-              ├─ 本地工具 (tools/*.py)
-              └─ 子实例工具 (SubInstanceTool)
-```
+**工作流程**：
+1. AgentSystem 启动时，ProcessManager 创建 FastMCP 服务器子进程
+2. 通过 stdio 建立通信通道，使用 JSON-RPC 协议交换消息
+3. 扫描 `tools/` 目录，将发现的异步函数注册为 MCP 工具
+4. 将子实例也注册为特殊类型的工具（SubInstanceTool）
+5. 所有工具调用都通过统一的 MCP 协议转发
+
+**设计原则**：
+- 隔离性：工具执行在独立的子进程中
+- 稳定性：避免工具错误影响主进程
+- 标准化：遵循 MCP 协议规范
+- 可扩展性：易于添加新的工具类型
 
 ### 2. 简化的工具格式
 
-**零样板代码**：无需装饰器，直接写异步函数即可成为工具。
+**零样板代码**：无需装饰器，直接写异步函数即可成为工具。系统自动发现、注册和调用。
 
-```python
-# ✅ 当前格式 - 简洁
-async def add(a: float, b: float) -> dict:
-    """计算两个数字的和"""
-    return {"result": a + b}
+**工作流程**：
+1. ToolLoader 在启动时扫描 `tools/` 目录下的所有 `.py` 文件
+2. 注册到 FastMCP 服务器，等待调用
 
-# 工具自动命名：calculator__add
-# 完整 MCP 名称：mcp__custom_tools__calculator__add
-```
-
-**自动发现机制**：
-- 扫描 `tools/` 目录下的所有 `.py` 文件
-- 提取所有异步函数（`async def`）
-- 使用函数文档字符串作为工具描述
-- 自动注册到 FastMCP 服务器
+**设计原则**：
+- 简洁性：最小化学习成本
+- 自动化：减少手动配置
+- 可发现性：自动扫描和注册
+- 标准化：统一的工具接口
 
 ### 3. 无状态 Agent 设计
 
-**核心理念**：Agent 不保存任何 session 信息，每个查询返回自己的 session_id。
+**核心理念**：Agent 不保存任何 session 信息，每个查询返回自己的 session_id，天然支持并发查询。
 
-```python
-# 支持并发查询
-task1 = agent.query_text("任务1")
-task2 = agent.query_text("任务2")
-results = await asyncio.gather(task1, task2)
-# 每个查询都有独立的 session_id
-```
+**工作流程**：
+1. 每次 `query()` 调用都会创建新的会话上下文
+2. 会话信息存储在 Session 对象中，与 Agent 解耦
+3. 查询结果包含 session_id，用于后续的会话恢复
+4. 支持通过 `resume_session_id` 继续之前的会话
+5. 多个查询可以并发执行，互不干扰
 
-**优势**：
-- ✅ 支持并发查询
-- ✅ 线程安全
-- ✅ 简化状态管理
+**设计原则**：
+- 无状态：简化并发处理
+- 线程安全：避免锁机制
+- 可扩展：支持水平扩展
+- 独立性：每个查询独立
 
-**对比**：
-| 设计 | 有状态 Agent | 无状态 Agent（当前） |
-|------|--------------|---------------------|
-| Session 存储 | `agent.current_session_id` | `result.session_id` |
-| 并发查询 | ❌ 不支持 | ✅ 支持 |
-| 线程安全 | ❌ 需要加锁 | ✅ 天然安全 |
+### 4. 实时消息系统
 
-### 4. 子实例作为工具对象
+基于 Redis Pub/Sub 的实时消息推送架构，支持：
+- 消息产生时立即推送（延迟 < 100ms）
+- 异步批量写入，提升性能
+- 双层存储（Redis + JSONL），确保可靠性
+- 自动降级策略，Redis 不可用时使用内存模式
 
-**设计原则**：子实例不是独立的 MCP 服务器，而是注册到主 MCP 服务器的工具对象。
+**工作流程**：
+1. MessageBus 作为全局单例管理所有 Redis 连接
+2. Session 记录消息时，同时发布到 Redis 和写入 JSONLWriter
+3. Redis 消息立即推送到订阅者（实时性）
+4. JSONLWriter 批量缓冲，定时或达到阈值时刷新到文件（持久化）
+5. 如果 Redis 不可用，自动降级到纯内存收集模式
 
-```
-# ✅ 简化后的架构
-所有工具和子实例 → 统一的 MCP 服务器子进程 → stdio 通信
-```
+**设计原则**：
+- 实时性：最小化消息延迟
+- 可靠性：双层存储保证
+- 高性能：批量异步写入
+- 容错性：自动降级机制
 
-**SubInstanceTool 特性**：
-- 实现 `__call__` 方法，可直接被调用
-- 延迟实例化：只在被调用时才创建 `AgentSystem`
-- 自动清理：调用完成后自动 `cleanup()`
-- 独立会话：子实例的会话记录在子实例自己的 `sessions/` 目录下
-- 自动追踪：父实例自动追踪子实例的 `session_id` 并记录到统计信息中
+### 5. 模块化会话系统
 
-### 5. 会话记录系统
+会话系统采用清晰的模块化设计，各模块职责分离：
 
-**设计原则**：内存收集 + 一次性写入，KISS 原则（Keep It Simple, Stupid）。
+- **core**：会话核心功能，管理会话生命周期
+- **streaming**：实时消息流，处理消息分发
+- **storage**：异步批量存储，优化 I/O 性能
+- **query**：查询和树构建，支持复杂查询
+- **utils**：工具函数，提供通用功能
 
-**实现逻辑**：
-1. `record_message()` - 将消息追加到内存列表（无 I/O）
-2. `finalize()` - 会话结束时一次性写入所有消息
-3. 性能优化：每个会话只有 1 次磁盘写入操作
-4. 内存友好：写入完成后立即清空内存列表
+**工作流程**：
+1. SessionManager 创建会话时，初始化所有相关模块
+2. core.Session 负责会话的基本操作（记录消息、生成统计）
+3. streaming.MessageBus 处理实时消息分发（如果启用）
+4. storage.JSONLWriter 管理异步批量写入
+5. query 模块提供会话查询和树构建功能
 
-**会话 ID 格式**：`{timestamp}_{counter}_{short_hash}`
-- 示例：`20251211T061755_0001_a3f9c2d8`
-- 保证唯一性和可排序性
+**设计原则**：
+- 单一职责：每个模块专注特定功能
+- 松耦合：模块间依赖最小化
+- 可扩展：易于添加新功能
+- 可维护：代码结构清晰
 
-**目录结构**：
+### 6. 递归子实例系统
+
+**核心理念**：子实例是完整的 AgentSystem，可以无限嵌套，实现任务的分层处理。
+
+**工作流程**：
+1. 父实例启动时，读取配置中的 `sub_claude_instances` 定义
+2. SubInstanceAdapter 将子实例封装为工具，但不立即创建
+3. 当 Claude 决定使用子实例时，才动态创建子实例（延迟实例化）
+4. 子实例作为工具被调用，传递 `parent_session_id` 建立关联
+5. 子实例完成后自动清理，释放资源
+6. 父实例的会话记录中自动包含所有子会话的引用
+
+**设计原则**：
+- 递归性：支持无限层级嵌套
+- 延迟性：按需创建，节省资源
+- 独立性：子实例有完整的生命周期
+- 可追踪性：自动维护父子关系
+
+### 7. 配置驱动的实例管理
+
+**核心理念**：每个实例都是独立的，通过配置文件定义其行为和特性。
+
+**工作流程**：
+1. AgentSystem 实例化时，ConfigManager 读取实例目录的配置文件
+2. 配置文件定义了模型、系统提示词、工具权限、子实例等
+3. 根据配置加载相应的工具和子实例
+4. 环境变量可以覆盖配置文件中的设置
+5. 支持配置验证，确保配置的正确性
+
+**设计原则**：
+- 声明式：通过配置文件定义行为
+- 灵活性：支持多层级配置覆盖
+- 验证性：自动验证配置的完整性
+- 隔离性：每个实例独立配置
+
+### 系统整体工作流程
+
+#### 初始化阶段
+1. **配置加载**：ConfigManager 读取并验证实例配置
+2. **工具发现**：ToolLoader 扫描 `tools/` 目录，自动注册工具
+3. **子实例注册**：将配置的子实例封装为 SubInstanceTool
+4. **MCP 服务器启动**：ProcessManager 创建 FastMCP 服务器子进程
+5. **消息总线初始化**：如果启用，创建全局 MessageBus 并连接 Redis
+
+#### 查询执行阶段
+1. **查询接收**：AgentSystem 接收查询文本和可选参数
+2. **会话创建**：SessionManager 创建新的会话或恢复已有会话
+3. **上下文准备**：加载系统提示词、配置和工具列表
+4. **Claude 调用**：通过 SDK 向 Claude 发送请求
+5. **工具执行**：Claude 决定使用工具时，通过 MCP 协议调用
+   - 本地工具：直接在子进程中执行异步函数
+   - 子实例工具：动态创建子实例并执行查询
+6. **消息记录**：每个消息都会记录到会话中
+   - 同时发布到 Redis（如果启用）
+   - 写入 JSONLWriter 缓冲区
+7. **结果返回**：将 Claude 的响应和 session_id 返回给调用者
+
+#### 会话管理阶段
+1. **消息收集**：会话过程中持续收集所有消息
+2. **实时推送**：如果启用 MessageBus，实时推送消息
+3. **批量写入**：JSONLWriter 定期刷新消息到文件
+4. **统计生成**：会话结束时生成详细的统计信息
+5. **关系追踪**：自动记录子实例调用的会话关系
+
+#### 清理阶段
+1. **资源释放**：调用 cleanup() 释放所有资源
+2. **进程终止**：停止 MCP 服务器子进程
+3. **连接关闭**：关闭 Redis 连接（如果启用）
+4. **缓冲区刷新**：强制刷新所有未写入的消息
+
+## 系统组件
+
+### AgentSystem（主控制器）
+- 负责协调各个组件
+- 管理 Agent 实例的生命周期
+- 提供统一的查询接口
+- 处理配置和初始化
+
+### ConfigManager（配置管理器）
+- 统一管理所有配置
+- 支持配置验证和解析
+- 处理环境变量覆盖
+- 提供配置访问接口
+
+### MCP Server 模块
+- **ProcessManager**：MCP 服务器进程管理器，负责启动、管理和关闭 MCP 服务器子进程
+- **MCPServer**：基于 FastMCP 的服务器实现，处理工具注册和调用
+- **ToolLoader**：自动扫描和加载 `tools/` 目录下的异步函数工具
+
+### ToolManager（工具管理器）
+- 集成 MCP 服务器提供的工具接口
+- 管理工具权限控制
+- 处理工具调用请求
+- 协调本地工具和子实例工具
+
+### SubInstanceAdapter（子实例适配器）
+- 将子实例封装为工具
+- 管理子实例的创建和销毁
+- 处理父子会话关系
+- 实现延迟实例化
+
+### SessionManager（会话管理器）
+- 创建和管理会话实例
+- 处理会话持久化
+- 管理会话生命周期
+- 支持会话查询和恢复
+
+### MessageBus（消息总线）
+- 全局单例，管理 Redis 连接
+- 处理消息发布和订阅
+- 支持多频道消息分发
+- 提供连接池管理
+
+### JSONLWriter（异步写入器）
+- 批量缓冲消息写入
+- 定时刷新机制
+- 支持紧急备份
+- 优化 I/O 性能
+
+## 关键概念
+
+### instances 目录结构
+
+`instances/` 目录是系统的核心，存储所有 claude 实例的配置和数据：
+
 ```
 instances/
-├── parent_agent/sessions/
-│   └── 20251211T061755_0001_a3f9c2d8/      # 父实例会话
-│       ├── metadata.json                    # 会话元数据
-│       ├── messages.jsonl                   # 消息记录（JSON Lines）
-│       └── statistics.json                  # 统计信息（包含子会话追踪）
-│
-└── child_agent/sessions/
-    └── 20251211T061800_0001_b4e8d3f9/      # 子实例会话（独立存储）
-        ├── metadata.json
-        ├── messages.jsonl
-        └── statistics.json
+└── {instance_name}/          # 实例目录
+    ├── config.yaml          # 实例配置文件（必需）
+    ├── .claude/              # Claude 相关配置
+    │   ├── commands/         
+    │   ├── agents/         
+    │   ├── skills/         
+    │   ├── .mcp.json        # 外部 MCP 服务器配置（可选）
+    │   └── settings.json    # Claude Code 设置（可选）
+    ├── tools/                # 自定义工具目录（可选）
+    │   └── *.py             # 工具文件
+    └── sessions/             # 会话记录目录（自动创建）
+        └── {session_id}/     # 每个会话的独立目录
+    |———agent.md 实例的提示词文档
 ```
 
-**说明**：
-- 每个实例的会话存储在自己的 `instances/{instance_name}/sessions/` 目录下
-- 子实例会话不嵌套在父会话目录中（因为 MCP 子进程隔离）
-- 父实例的 `statistics.json` 记录所有调用过的子实例的 `session_id`
+**目录说明**：
+- **config.yaml**：定义实例的基本配置、模型、工具权限等
+- **.claude/**：存放 Claude 相关的配置文件
+- **tools/**：存放该实例专用的自定义工具
+- **sessions/**：自动创建，存储该实例的所有会话记录
 
-**✨ 子实例 Session 自动追踪**：
+### Session ID vs Claude ID
 
-系统会自动检测并记录子实例的 session_id，实现父子会话关联：
+**Session ID（会话ID）**：
+- 格式：`{timestamp}_{counter}_{short_hash}`
+- 示例：`20251216T103000_1234_abcd1234`
+- 用途：标识一次完整的对话会话
+- 特点：
+  - 由系统生成，确保唯一性
+  - 包含时间戳，支持按时间排序
+  - 用于会话恢复和查询
+  - 存储在文件系统中，持久化保存
 
-1. **自动提取**：子实例在返回结果时自动嵌入 `<!--SESSION_ID:xxx-->` 标记
-2. **智能检测**：父实例检测到子实例工具调用时，自动解析 session_id
-3. **关联记录**：将子实例 session_id 保存到父会话的 `statistics.json` 中
-4. **完整追踪**：支持递归追踪多层嵌套的子实例调用链
+**Claude ID**：
+- 格式：由 Claude SDK 内部管理的唯一标识符
+- 用途：标识与 Claude API 的单次对话会话
+- 特点：
+  - 仅在单次查询生命周期内有效
+  - 由 SDK 管理，对用户透明
+  - 用于 SDK 内部的状态管理
+  - 不持久化，查询结束后失效
 
-```python
-# 父会话的 statistics.json 自动包含：
-{
-  "subsessions": [
-    {
-      "session_id": "20251211T061800_0001_b4e8d3f9",  # 子实例的会话 ID
-      "tool_name": "mcp__custom_tools__sub_claude_file_analyzer",
-      "tool_use_id": "toolu_abc123",
-      "timestamp": "2025-12-14T10:30:00"
-    }
-  ]
-}
-
-# 通过 session_id 可以查询子实例的完整会话记录：
-# instances/file_analyzer_agent/sessions/20251211T061800_0001_b4e8d3f9/
-```
-
-### 6. 延迟实例化
-
-**设计原则**：配置加载时只创建工具定义，工具被调用时才实例化。
-
-```
-初始化阶段 (initialize):
-  ├─ 加载 config.yaml
-  ├─ 发现 tools/ 目录下的工具
-  ├─ 创建工具定义（函数签名）
-  ├─ 启动 MCP 服务器子进程
-  └─ ❌ 不实例化子 Claude（延迟到调用时）
-
-工具调用阶段 (tool execution):
-  ├─ Claude 决定调用某个工具
-  ├─ ✅ 动态创建 AgentSystem 实例
-  ├─ 初始化并执行查询
-  └─ 返回结果后自动清理
-```
-
-**优势**：节省资源，提高启动速度。
-
-### 7. 递归嵌套支持
-
-**设计原则**：每一层都是完整的 `AgentSystem`，支持无限嵌套。
-
-```
-Parent Agent (Session: 20251211T061755_0001_a3f9c2d8)
-  ├─ Tool: calculator
-  └─ Sub Claude: code_reviewer (Session: 20251211T061800_0001_b4e8d3f9)
-       ├─ Tool: lint_checker
-       └─ Sub Claude: syntax_analyzer (Session: 20251211T061805_0001_c5e9f4a0)
-            └─ Sub Claude: ...（继续嵌套）
-```
-
-### 8. Resume 多轮对话
-
-**设计原则**：通过 `resume_session_id` 参数恢复之前的会话。
-
-**行为说明**：
-- 新消息追加到原会话的 `messages.jsonl` 文件
-- 序列号（seq）自动从之前的消息数量继续递增
-- 统计信息覆盖（ResultMessage 包含累计值）
-- Claude session_id 在第一条 SystemMessage 时就获取并保存
-
-**使用示例**：
-```python
-result1 = await agent.query_text("第一个问题")
-result2 = await agent.query_text(
-    "继续讨论",
-    resume_session_id=result1.session_id
-)
-```
-
-## 快速开始
-
-### 安装
-
-```bash
-pip install -r requirements.txt
-```
-
-**依赖**：
-- `claude-agent-sdk` - Claude Agent SDK
-- `mcp>=1.0.0` - Model Context Protocol
-- `pyyaml>=6.0` - 配置解析
 
 ### 基础使用
 
@@ -252,468 +312,213 @@ async def main():
 asyncio.run(main())
 ```
 
-### 流式访问
+### 启用实时消息（可选）
 
 ```python
+import asyncio
+from src import AgentSystem
+from src.session.streaming import MessageBus
+
 async def main():
-    agent = AgentSystem("demo_agent")
-    await agent.initialize()
+    # 创建全局 MessageBus（单例）
+    message_bus = MessageBus.from_config()
+    await message_bus.connect()
 
-    # 流式获取所有消息
-    stream = await agent.query("分析这个项目")
-    async for message in stream:
-        message_type = type(message).__name__
-        if message_type == "AssistantMessage":
-            # 处理 AI 助手消息
-            from claude_agent_sdk import TextBlock
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    print(block.text, end="", flush=True)
+    try:
+        # 创建 Agent 实例（共享同一个 MessageBus）
+        agent = AgentSystem("demo_agent", message_bus=message_bus)
+        await agent.initialize()
 
-    print(f"\n会话 ID: {stream.session_id}")
+        # 执行查询（消息会自动推送到 Redis）
+        result = await agent.query_text("分析这个项目")
+        print(f"结果: {result.result}")
+        print(f"会话 ID: {result.session_id}")
+
+        agent.cleanup()
+    finally:
+        await message_bus.close()
+
+asyncio.run(main())
 ```
-
-## 自定义工具开发
-
-### 创建工具
-
-在 `instances/{your_agent}/tools/` 目录下创建 Python 文件，直接写异步函数：
-
-```python
-# instances/demo_agent/tools/calculator.py
-
-async def add(a: float, b: float) -> dict:
-    """
-    计算两个数字的和
-
-    Args:
-        a: 第一个数字
-        b: 第二个数字
-
-    Returns:
-        计算结果
-    """
-    result = a + b
-    return {
-        "operation": "add",
-        "operands": [a, b],
-        "result": result
-    }
-
-async def multiply(a: float, b: float) -> dict:
-    """计算两个数字的乘积"""
-    result = a * b
-    return {
-        "operation": "multiply",
-        "operands": [a, b],
-        "result": result
-    }
-```
-
-**工具命名规则**：
-- 文件名：`calculator.py`，函数名：`add`
-- 自动生成工具名：`calculator__add`
-- 完整 MCP 工具名：`mcp__custom_tools__calculator__add`
-
-**最佳实践**：
-- ✅ 使用异步函数（`async def`）
-- ✅ 添加类型注解
-- ✅ 编写详细的文档字符串
-- ✅ 返回结构化字典
-- ✅ 处理异常，返回错误信息
-
-## 配置说明
-
-### 完整配置示例
-
-```yaml
-# instances/demo_agent/config.yaml
-
-agent:
-  name: "demo_agent"
-  description: "演示实例"
-
-model: "claude-sonnet-4-5"
-system_prompt_file: ".claude/agent.md"  # 推荐使用 agent.md
-
-# 工具权限（内置工具默认全部允许）
-tools:
-  # 禁止特定内置工具
-  disallowed:
-    - "WebFetch"
-    - "WebSearch"
-    - "KillShell"
-
-  # 允许 MCP 工具（自定义工具、外部 MCP、子实例）
-  allowed:
-    - "mcp__custom_tools__calculator__*"        # 本地工具
-    - "mcp__custom_tools__sub_claude_*"         # 子实例工具
-    - "mcp__external_database__*"               # 外部 MCP 服务器
-
-# 子实例配置
-sub_claude_instances:
-  file_analyzer: "file_analyzer_agent"
-  syntax_checker: "syntax_checker_agent"
-
-# 会话记录配置
-session_recording:
-  enabled: true
-  retention_days: 30
-  max_total_size_mb: 1000
-  auto_cleanup: true
-  message_types: null  # null 表示记录所有类型（推荐）
-
-# 高级配置
-advanced:
-  permission_mode: "bypassPermissions"
-  max_turns: 100
-
-  # SDK 超时配置（避免子实例崩溃）
-  env:
-    CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "300000"  # 5分钟
-    MCP_TIMEOUT: "120000"                       # 2分钟
-    MCP_TOOL_TIMEOUT: "180000"                  # 3分钟
-```
-
-### 工具权限说明
-
-**重要**：内置工具（Read, Write, Bash 等）默认全部允许，要禁止需在 `disallowed` 中明确列出。
-
-`allowed` 列表主要用于限制 MCP 工具：
-- **自定义工具**：`tools/` 目录下的异步函数
-- **子实例工具**：封装的子 Claude 实例
-- **外部 MCP 服务器**：通过 `.mcp.json` 配置的外部服务
-
-支持通配符 `*` 进行模式匹配。
-
-## API 文档
-
-### AgentSystem
-
-主类，用于管理和运行 Claude Agent 实例。
-
-**初始化**：
-```python
-agent = AgentSystem(
-    instance_name="demo_agent",  # 实例名称或路径
-    instances_root=None          # 实例根目录（可选）
-)
-await agent.initialize()
-```
-
-**方法**：
-
-- `async query(prompt: str, record_session: bool = True, resume_session_id: Optional[str] = None, parent_session_id: Optional[str] = None) -> QueryStream`
-  - 返回可迭代的 QueryStream 对象
-  - 包含 `session_id` 属性
-  - `parent_session_id` 用于子实例调用，标识父会话
-
-- `async query_text(prompt: str, record_session: bool = True, resume_session_id: Optional[str] = None, parent_session_id: Optional[str] = None) -> QueryResult`
-  - 返回 QueryResult 对象（包含 `result` 和 `session_id`）
-  - `parent_session_id` 用于子实例调用，标识父会话
-
-- `cleanup()` - 清理资源，停止 MCP 服务器
-
-**属性**：
-
-- `agent_name` - Agent 名称
-- `agent_description` - Agent 描述
-- `tools_count` - 工具数量
-- `sub_instances_count` - 子实例数量
-
-### QueryResult
-
-查询结果对象（`query_text()` 返回）。
-
-**属性**：
-- `result: str` - 查询结果文本
-- `session_id: Optional[str]` - 会话 ID
-
-### QueryStream
-
-查询流对象（`query()` 返回）。
-
-**特性**：
-- 实现异步迭代器协议，可使用 `async for` 遍历
-- 包含 `session_id` 属性
-
-### ConfigManager
-
-配置管理器，统一处理所有配置相关功能（重构后的核心组件）。
-
-**初始化**：
-```python
-from src.config_manager import ConfigManager
-
-manager = ConfigManager("instances/demo_agent")
-```
-
-**主要方法**：
-- `load_config() -> dict[str, Any]` - 加载并验证主配置文件
-- `load_mcp_config() -> dict[str, dict[str, Any]]` - 加载MCP服务器配置
-- `validate_config(config: dict[str, Any]) -> None` - 验证配置结构
-- `resolve_path(path: str) -> Path` - 解析路径（相对或绝对）
-- `get_claude_options_dict() -> dict[str, Any]` - 生成Claude SDK配置参数
-
-**属性**：
-- `config` - 获取已加载的配置字典
-- `agent_name` - Agent名称
-- `agent_description` - Agent描述
-- `mcp_config` - 获取已加载的MCP配置
-
-**便捷函数**：
-```python
-from src.config_manager import load_mcp_config, merge_mcp_configs
-
-# 加载MCP配置（无需实例化）
-mcp_config = load_mcp_config("instances/demo_agent")
-
-# 合并SDK和外部MCP服务器配置
-merged = merge_mcp_configs(sdk_servers, external_servers)
-```
-
-### Session 模块
-
-会话记录相关功能已独立成 `src.session` 模块，提供：
-
-**核心类**：
-- `SessionManager` - 会话管理器
-- `Session` - 单个会话对象
-- `QueryStreamManager` - 查询流管理器
-- `SessionContext` - 会话上下文管理器
-
-**工具函数**：
-- `generate_session_id()` - 生成唯一会话 ID
-- `Statistics` - 会话统计数据类
-
-**序列化**：
-- `MessageSerializer` - 消息序列化器
-
-**查询 API**：
-- `get_session_details()` - 获取会话详情
-- `list_sessions()` - 列出会话
-- `search_sessions()` - 搜索会话
-- `export_session()` - 导出会话
-
-## 子实例（高级特性）
-
-### 创建子实例
-
-子实例是完整的 `AgentSystem`，可以有自己的配置和工具。
-
-**1. 创建子实例目录**：
-```
-instances/
-├── parent_agent/
-│   └── config.yaml
-└── code_reviewer_agent/
-    ├── config.yaml
-    ├── .claude/
-    │   └── agent.md
-    └── tools/
-        └── lint.py
-```
-
-**2. 配置子实例**：
-```yaml
-# code_reviewer_agent/config.yaml
-agent:
-  name: "code_reviewer"
-  description: "代码审查助手"
-
-model: "claude-opus-4-5"  # 可使用不同模型
-system_prompt_file: ".claude/agent.md"
-
-session_recording:
-  enabled: true
-  retention_days: 60
-```
-
-**3. 在父实例中配置**：
-```yaml
-# parent_agent/config.yaml
-sub_claude_instances:
-  code_reviewer: "code_reviewer_agent"
-```
-
-### 使用子实例
-
-```python
-agent = AgentSystem("parent_agent")
-await agent.initialize()
-
-# Claude 会自动决定何时使用子实例
-prompt = """
-使用 code_reviewer 子实例审查以下文件：
-- src/main.py
-- src/utils.py
-"""
-
-result = await agent.query_text(prompt)
-
-# 查询父会话的统计信息，可以获取子实例的 session_id
-parent_session_id = result.session_id
-from src.session.session_query import get_session_details
-session_details = get_session_details(
-    instance_name="parent_agent",
-    session_id=parent_session_id
-)
-print(session_details['statistics']['subsessions'])
-# [{"session_id": "...", "tool_name": "sub_claude_code_reviewer", ...}]
-```
-
-**SubInstanceTool 工具参数**：
-- `task` - 任务描述
-- `parent_session_id` - **必填**，父会话 ID（用于追踪）
-- `context_files` - 相关文件列表
-- `output_format` - 输出格式（text/json/markdown）
-- `resume_session_id` - 要恢复的子会话 ID
-- `variables` - 变量字典
 
 ## 项目结构
 
 ```
 claude_agent_system/
 ├── src/                              # 核心框架
-│   ├── agent_system.py              # 系统主类
-│   ├── config_manager.py            # 配置管理（统一管理）
-│   ├── tool_manager.py              # 工具管理
-│   ├── sub_instance_adapter.py      # 子实例适配器
-│   ├── session/                     # 会话记录模块（独立模块）
-│   │   ├── __init__.py             # 模块接口
-│   │   ├── session_utils.py        # 工具函数和数据类
-│   │   ├── session_serializer.py   # 消息序列化
-│   │   ├── session_query.py        # 查询 API
-│   │   ├── session_context.py      # 上下文管理
-│   │   └── stream_manager.py       # 流管理
-│   ├── mcp_server/                  # FastMCP 服务器
-│   │   ├── server.py                # 服务器主逻辑
-│   │   ├── tool_loader.py           # 工具加载器
-│   │   └── process_manager.py       # 进程管理
-│   ├── error_handling.py            # 错误处理
-│   ├── logging_config.py            # 日志配置
+│   ├── session/                      # 会话记录模块
+│   │   ├── core/                    # 会话核心
+│   │   │   ├── session.py          # Session 类
+│   │   │   └── session_manager.py  # SessionManager 类
+│   │   ├── streaming/               # 实时消息流
+│   │   │   ├── message_bus.py      # Redis 消息总线
+│   │   │   └── stream_manager.py   # 查询流管理器
+│   │   ├── storage/                 # 存储模块
+│   │   │   └── jsonl_writer.py     # 异步批量写入器
+│   │   ├── query/                   # 查询模块
+│   │   │   ├── session_query.py   # 查询 API
+│   │   │   └── tree_builder.py     # 会话树构建器
+│   │   └── utils/                   # 工具模块
+│   │       ├── session_utils.py    # 工具函数
+│   │       └── session_serializer.py # 消息序列化器
+│   ├── mcp_server/                  # MCP 服务器模块
+│   │   ├── process_manager.py      # 进程管理器
+│   │   ├── server.py               # FastMCP 服务器
+│   │   └── tool_loader.py          # 工具加载器
+│   ├── agent_system.py             # 系统主类
+│   ├── config_manager.py           # 配置管理
+│   ├── tool_manager.py             # 工具管理
+│   ├── sub_instance_adapter.py     # 子实例适配器
+│   ├── error_handling.py           # 错误处理
+│   ├── logging_config.py           # 日志配置
 │   └── __init__.py
 │
-├── instances/                        # 实例目录
-│   └── demo_agent/
-│       ├── config.yaml
-│       ├── .claude/
-│       │   ├── agent.md            # 系统提示词
-│       │   └── .mcp.json           # 外部 MCP 配置
-│       ├── tools/                   # 自定义工具
-│       │   ├── calculator.py
-│       │   └── file_analyzer.py
-│       └── sessions/                # 会话记录（自动创建）
+├── instances/                       # 实例目录
+│   ├── demo_agent/                  # 演示实例
+│   │   ├── config.yaml             # 实例配置
+│   │   ├── .claude/
+│   │   │   ├── agent.md           # 系统提示词
+│   │   │   └── settings.json      # Claude 设置
+│   │   ├── tools/                  # 自定义工具
+│   │   └── sessions/               # 会话记录（自动创建）
+│   ├── file_analyzer_agent/        # 文件分析实例
+│   └── syntax_checker_agent/       # 语法检查实例
 │
+├── docs/                           # 文档目录
+│   ├── configuration.md           # 配置指南
+│   ├── session-system.md          # 会话系统详解
+│   ├── tool-development.md        # 工具开发指南
+│   ├── sub-instances.md           # 子实例系统
+│   ├── real-time-system.md        # 实时消息系统
+│   ├── api-reference.md           # API 参考
+│   ├── faq.md                    # 常见问题
+│   └── migration-guide.md        # 迁移指南
+│
+├── streaming.yaml                 # 实时消息配置（可选）
 ├── requirements.txt
-└── MCP_MIGRATION_WORK_LOG.md        # 迁移工作记录
+└── CLAUDE.md                      # 本文档
 ```
 
+## 功能概览
 
-## 常见问题
+### 自定义工具
+- 在 `tools/` 目录下编写异步函数
+- 自动发现和注册，无需手动配置
+- 支持类型注解和文档字符串
+- 详细指南：[工具开发指南](docs/tool-development.md)
 
-### 工具开发
+### 子实例系统
+- 支持无限层级的子实例嵌套
+- 每个子实例是完整的 AgentSystem
+- 自动追踪父子会话关系
+- 详细指南：[子实例系统](docs/sub-instances.md)
 
-**Q: 如何创建自定义工具？**
+### 配置管理
+- YAML 配置文件驱动
+- 支持环境变量覆盖
+- 灵活的权限控制
+- 详细指南：[配置指南](docs/configuration.md)
 
-在 `tools/` 目录下创建 Python 文件，直接写异步函数，无需装饰器：
-```python
-async def my_function(param1: str) -> dict:
-    """工具描述"""
-    return {"result": "..."}
-```
+### 会话系统
+- 完整的会话记录和管理
+- 支持会话恢复和查询
+- 实时消息推送
+- 详细指南：[会话系统详解](docs/session-system.md)
 
-**Q: 工具必须是异步函数吗？**
+## 文档索引
 
-是的。系统只会自动发现 `async def` 函数。
+- [配置指南](docs/configuration.md) - 完整的配置选项说明
+- [会话系统详解](docs/session-system.md) - 会话记录和管理系统
+- [工具开发指南](docs/tool-development.md) - 创建自定义工具
+- [子实例系统](docs/sub-instances.md) - 子实例的使用和配置
+- [实时消息系统](docs/real-time-system.md) - Redis Pub/Sub 实时推送
+- [API 参考](docs/api-reference.md) - 完整的 API 文档
+- [常见问题](docs/faq.md) - FAQ 和故障排除
+- [迁移指南](docs/migration-guide.md) - 版本升级指南
 
-**Q: 工具名称如何生成？**
+## 开发和维护约束
 
-自动生成规则：`{文件名}__{函数名}`，完整 MCP 名称：`mcp__custom_tools__{文件名}__{函数名}`
+### 代码开发约束
 
-### 工具权限
+#### 1. 模块化设计原则
+- **单一职责**：每个模块和类必须只负责一个明确的功能领域
+- **松耦合**：模块间依赖最小化，优先使用接口和抽象
+- **高内聚**：相关功能应该组织在同一个模块内
+- **可测试性**：所有核心组件都必须支持单元测试
 
-**Q: 为什么内置工具默认允许？**
+#### 2. 文件组织标准
+- **目录结构**：严格遵循项目结构规范，不得随意创建新目录
+- **命名规范**：
+  - 文件名使用小写字母和下划线（snake_case）
+  - 类名使用驼峰命名（PascalCase）
+  - 函数和变量使用小写字母和下划线（snake_case）
+- **导入顺序**：标准库 → 第三方库 → 本地模块
+- **文档字符串**：所有公共函数和类必须有详细的文档字符串
 
-内置的 Claude 工具（Read, Write, Bash 等）默认全部允许。要禁止需在 `disallowed` 中明确列出。
+#### 3. 架构约束
+- **依赖方向**：高层模块不依赖低层模块，都依赖抽象
+- **配置驱动**：所有行为必须通过配置文件控制，禁止硬编码
+- **错误处理**：使用统一的异常处理机制，定义明确的异常类型
+- **日志规范**：使用结构化日志，包含足够的上下文信息
 
-**Q: allowed 列表的作用？**
+#### 4. 解耦要求
+- **接口隔离**：使用抽象接口隔离具体实现
+- **依赖注入**：通过构造函数或工厂模式注入依赖
+- **事件驱动**：使用事件总线处理组件间通信
+- **配置外部化**：所有配置参数必须外部化，支持环境变量覆盖
 
-主要用于限制 MCP 工具（自定义工具、外部 MCP 服务器、子实例）。支持通配符 `*`。
+### 文档维护约束
 
-### 会话记录
+#### 1. 文档同步原则
+- **代码变更 → 文档更新**：任何代码结构变更都必须同步更新本文档
+- **先文档后实现**：新功能开发必须先更新相关文档，再编写代码
+- **版本一致性**：文档版本必须与代码版本保持一致
+- **审查流程**：文档变更必须经过代码审查流程
 
-**Q: 会话记录影响性能吗？**
+#### 2. 文档内容约束
+- **准确性**：所有描述必须与实际实现完全一致
+- **完整性**：新增组件必须包含完整的架构描述和使用说明
+- **可读性**：使用清晰的语言和适当的图表说明复杂概念
+- **示例代码**：所有公共 API 都必须提供使用示例
 
-几乎不会。消息在内存中收集，会话结束时一次性写入（每个会话只有 1 次 I/O）。
+#### 3. 文档索引维护
+- **链接有效性**：确保所有文档链接指向实际存在的文件
+- **内容覆盖**：每个系统组件都必须有对应的详细文档
+- **更新及时性**：功能变更后 24 小时内必须更新相关文档
 
-**Q: 如何实现多轮对话？**
+### 查看文档指南
 
-使用 `resume_session_id` 参数：
-```python
-result1 = await agent.query_text("第一个问题")
-result2 = await agent.query_text(
-    "继续讨论",
-    resume_session_id=result1.session_id
-)
-```
+#### 1. 本文档的定位
+- **CLAUDE.md**：系统核心架构和设计理念的总览文档
+- **重点内容**：系统整体设计、核心概念、组件关系、架构原则
+- **适用场景**：了解系统整体架构、新开发者入门、架构决策参考
 
-**Q: 子实例调用为什么要传递 parent_session_id？**
+#### 2. 详细文档查找
+如需了解具体组件的实现细节，请查看[文档索引](#文档索引)中的对应文档。
 
-用于追踪父子会话关系，实现会话层级记录和查询。这是**必填参数**，确保会话记录的完整性。
+#### 3. 文档阅读建议
+- **新手入门**：阅读核心特性 → 快速开始 → 配置指南
+- **开发者**：重点关注核心设计理念 → 系统组件 → 对应详细文档
+- **运维人员**：重点关注部署配置 → 实时消息系统 → 常见问题
+- **架构师**：重点关注核心设计理念 → 系统工作流程 → 开发约束
 
-### 系统提示词
+### 违反约束的后果
 
-**Q: 推荐使用什么文件名？**
+#### 1. 代码质量影响
+- 违反模块化原则将导致代码难以维护和测试
+- 不遵循文件组织标准会影响开发效率和代码可读性
+- 缺乏解耦设计会限制系统的扩展性和灵活性
 
-推荐使用 `agent.md`（而非 `CLAUDE.md`），避免与 Claude Code 项目配置冲突。
+#### 2. 项目风险
+- 文档不同步会增加开发成本和错误率
+- 架构约束的违反会降低系统的稳定性和性能
+- 不遵循开发约束会导致技术债务积累
 
-**Q: 如果不配置会怎样？**
+#### 3. 合规要求
+- 所有代码提交必须通过自动化检查（代码格式、结构规范）
+- 文档变更必须包含在 Pull Request 中
+- 架构重大变更需要经过技术委员会评审
 
-系统会自动按顺序查找：`system_prompt_file` → `agent.md` → `system_prompt.md` → `agent_prompt.md`
+---
 
-### FastMCP 架构
-
-**Q: 为什么使用 FastMCP + stdio？**
-
-主要原因：
-- 更高稳定性（避免 SDK 本地工具 bug）
-- 进程隔离（工具崩溃不影响主进程）
-- 标准协议（符合 MCP 规范）
-
-**Q: 如何调试 MCP 服务器？**
-
-MCP 服务器运行在独立子进程中，日志输出到标准错误（stderr）。可在工具中使用 `logger.error()` 输出调试信息。
-
-### SDK 超时配置
-
-**Q: 为什么需要配置超时？**
-
-子实例执行复杂任务时，SDK 默认 60 秒超时可能不够，会导致强制关闭。建议配置：
-
-```yaml
-advanced:
-  env:
-    CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "300000"  # 5分钟
-    MCP_TIMEOUT: "120000"                       # 2分钟
-    MCP_TOOL_TIMEOUT: "180000"                  # 3分钟
-```
-
-## 错误处理
-
-```python
-from src import AgentSystem, AgentSystemError
-
-try:
-    agent = AgentSystem("demo_agent")
-    await agent.initialize()
-    result = await agent.query_text("你好")
-except AgentSystemError as e:
-    print(f"系统错误: {e}")
-finally:
-    agent.cleanup()
-```
-
-## 完整示例
-
-查看 `instances/demo_agent/` 获取完整的配置示例和工具实现。
+> **注意**：这些约束是为了确保系统的长期可维护性和团队协作效率。如有特殊原因需要偏离约束，必须经过充分讨论并获得团队同意。
