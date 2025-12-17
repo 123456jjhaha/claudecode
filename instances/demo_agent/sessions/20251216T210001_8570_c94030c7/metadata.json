@@ -1,0 +1,17 @@
+{
+  "session_id": "20251216T210001_8570_c94030c7",
+  "instance_name": "demo_agent",
+  "start_time": "2025-12-16T21:00:01.219590",
+  "end_time": null,
+  "status": "running",
+  "prompts": [
+    {
+      "prompt": "Hello, please briefly introduce yourself",
+      "timestamp": "2025-12-16T21:00:01.219590"
+    }
+  ],
+  "results": [],
+  "depth": 0,
+  "parent_session_id": null,
+  "context": {}
+}

@@ -9,6 +9,7 @@
 - storage/: 存储组件（JSONLWriter）
 - query/: 查询 API（session_query, SessionTreeBuilder）
 - utils/: 工具函数（session_utils, session_serializer）
+- provider/: 统一消息提供器（MessageProvider 及相关组件）
 
 主要组件：
 - SessionManager: 会话管理器，负责创建和管理会话
@@ -18,6 +19,7 @@
 - JSONLWriter: 异步批量 JSONL 写入器
 - SessionTreeBuilder: 会话树构建器
 - MessageSerializer: 消息序列化器
+- MessageProvider: 统一消息提供器，整合历史和实时消息
 
 工具函数：
 - generate_session_id: 生成唯一的会话 ID
@@ -52,6 +54,18 @@ try:
 except ImportError:
     SessionTreeBuilder = None
 
+# 统一消息提供器
+try:
+    from .provider import MessageProvider, MessageFormatter, MessageMerger, MessageReader, RealtimeSubscriber
+    _provider_available = True
+except ImportError:
+    MessageProvider = None
+    MessageFormatter = None
+    MessageMerger = None
+    MessageReader = None
+    RealtimeSubscriber = None
+    _provider_available = False
+
 __all__ = [
     # 核心类
     "SessionManager",
@@ -74,4 +88,11 @@ __all__ = [
 
     # 会话树构建器
     "SessionTreeBuilder",
+
+    # 统一消息提供器
+    "MessageProvider",
+    "MessageFormatter",
+    "MessageMerger",
+    "MessageReader",
+    "RealtimeSubscriber",
 ]

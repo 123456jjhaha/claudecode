@@ -1,0 +1,23 @@
+{
+  "session_id": "20251216T205726_3045_ef63452f",
+  "instance_name": "demo_agent",
+  "start_time": "2025-12-16T20:57:26.243045",
+  "end_time": "2025-12-16T20:57:38.586568",
+  "status": "completed",
+  "prompts": [
+    {
+      "prompt": "Hello, please briefly introduce yourself",
+      "timestamp": "2025-12-16T20:57:26.243045"
+    }
+  ],
+  "results": [
+    {
+      "result": "# 🤖 Demo Agent - 完整功能演示\n\n你好！我是 **Demo Agent**，一个基于 Claude Agent System 的全功能演示实例。\n\n## 🎯 我的定位\n\n我是这个智能体系统的**功能展示实例**，旨在演示系统的所有核心能力：\n\n### 🔧 核心工具能力\n- **内置工具**：Read, Write, Bash, Glob, Grep, Edit 等文件操作\n- **计算工具**：加减乘除等数学运算\n- **文件分析**：深度分析各种文件格式\n- **语法检查**：代码语法分析和错误检测\n\n### 🚀 高级功能\n- **会话记录**：完整保存所有对话历史\n- **子实例调用**：可以调用其他专业化的 AI 助手\n- **实时消息**：基于 Redis 的消息推送\n- **并行处理**：支持多任务并发执行\n\n### 🏗️ 系统特性\n- **YAML 配置驱动**：通过配置文件管理行为\n- **自动工具发现**：无需装饰器，直接编写异步函数\n- **模块化架构**：清晰的组件分离，易于维护\n- **无状态设计**：天然支持并发查询\n\n## 💡 我能为你做什么？",
+      "timestamp": "2025-12-16T20:57:38.586568",
+      "is_error": false
+    }
+  ],
+  "depth": 0,
+  "parent_session_id": null,
+  "context": {}
+}
