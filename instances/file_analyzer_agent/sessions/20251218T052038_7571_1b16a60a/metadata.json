@@ -1,0 +1,23 @@
+{
+  "session_id": "20251218T052038_7571_1b16a60a",
+  "instance_name": "file_analyzer_agent",
+  "start_time": "2025-12-18T05:20:38.617571",
+  "end_time": "2025-12-18T05:21:10.308069",
+  "status": "completed",
+  "prompts": [
+    {
+      "prompt": "请对文件 'test_analysis.txt' 进行深度分析，包括：\n1. 文件基本信息（大小、类型、结构等）\n2. 内容摘要和主要主题\n3. 关键信息提取（技术栈、特性、结论等）\n4. 文档结构分析\n请提供详细的分析报告。\n\n相关文件:\n- test_analysis.txt\n\n\n请以 structured 格式输出结果。",
+      "timestamp": "2025-12-18T05:20:38.617571"
+    }
+  ],
+  "results": [
+    {
+      "result": "## 文件深度分析报告\n\n### 📋 文件基本信息\n- **文件名称**: test.txt\n- **文件大小**: 37.00 B (字节)\n- **文件类型**: 纯文本文件 (.txt)\n- **MIME类型**: text/plain\n- **编码格式**: UTF-8\n- **文件哈希**: \n  - SHA256: 02256ee69398dabb4ef71e7eb0a677fa8308d27c63a07abf88a7af1bcde19efb\n  - MD5: 1153dbe2eb954eef82abde45bead3e5e\n\n### 📁 文件系统属性\n- **创建时间**: 2025-12-13 09:30:48\n- **修改时间**: 2025-12-13 09:30:53\n- **访问时间**: 2025-12-18 05:20:57\n- **文件权限**: 666 (读写权限)\n- **是否可执行**: 否\n\n### 📊 内容摘要和主要主题\n**内容概览**:\n```\nHello World\n这是一个测试文件\n\n```\n\n**主要主题**:\n- 基础的多语言文本示例",
+      "timestamp": "2025-12-18T05:21:10.308069",
+      "is_error": false
+    }
+  ],
+  "depth": 0,
+  "parent_session_id": null,
+  "context": {}
+}

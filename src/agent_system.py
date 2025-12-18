@@ -269,7 +269,8 @@ class AgentSystem:
                 record_session=record_session,
                 prompt=prompt,
                 resume_session_id=resume_session_id,
-                parent_session_id=parent_session_id  # 传递父会话 ID
+                parent_session_id=parent_session_id,  # 传递父会话 ID
+                instance_path=str(self.instance_path)  # 传递实例路径
             )
 
             # 初始化 session（创建或恢复会话）

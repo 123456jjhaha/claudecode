@@ -1,563 +1,642 @@
 """
-会话查询 API 模块 - 精简版
+统一的会话查询与订阅服务
 
-提供核心的会话查询功能：
-- 查询会话详情
-- 列出会话
-- 搜索会话
-- 统计摘要
-- 导出会话
-- 实时订阅消息（新增）
+整合了：
+1. 会话查询功能（从原 session_query.py）
+2. 实时消息订阅功能（从 SessionSubscriber）
+3. 会话树构建功能（从 SessionTreeBuilder）
 """
 
+import asyncio
 import json
 from pathlib import Path
-from typing import Optional, List, Dict, Any, AsyncIterator
-from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
-from ..core.session_manager import SessionManager
-from ...error_handling import AgentSystemError
 from ...logging_config import get_logger
+from ...error_handling import AgentSystemError
+from ..core.session_manager import SessionManager
+from ..utils.query_helpers import (
+    calculate_session_statistics,
+    search_sessions_in_list,
+    export_session_to_text,
+    export_session_to_jsonl,
+    build_tree_node,
+    flatten_tree_to_list
+)
 
-# 新增：导入 MessageBus 类型
-try:
+if TYPE_CHECKING:
     from ..streaming.message_bus import MessageBus
-except ImportError:
-    MessageBus = None
 
 logger = get_logger(__name__)
 
 
-def _get_instance_path(
-    instance_name: str,
-    instances_root: Optional[Path] = None
-) -> Path:
+class SessionQuery:
     """
-    获取实例目录路径
+    统一的会话查询与订阅服务
 
-    Args:
-        instance_name: 实例名称
-        instances_root: 实例根目录（默认为当前目录下的 instances/）
-
-    Returns:
-        实例目录路径
-
-    Raises:
-        AgentSystemError: 实例目录不存在
+    职责：
+    1. 会话查询（基础+高级）
+    2. 实时消息订阅
+    3. 会话树构建
+    4. 会话导出与统计
     """
-    if instances_root is None:
-        instances_root = Path.cwd() / "instances"
 
-    instance_path = Path(instances_root) / instance_name
+    def __init__(
+        self,
+        instance_name: str,
+        instances_root: Optional[Path] = None,
+        message_bus: Optional["MessageBus"] = None
+    ):
+        """
+        初始化会话查询服务
 
-    if not instance_path.exists():
-        raise AgentSystemError(f"实例目录不存在: {instance_path}")
+        Args:
+            instance_name: 实例名称
+            instances_root: 实例根目录
+            message_bus: 消息总线（用于订阅功能）
+        """
+        from ..utils import get_instance_path
 
-    return instance_path
+        self.instance_name = instance_name
+        self.instances_root = instances_root
+        self.instance_path = get_instance_path(instance_name, instances_root)
 
+        # 核心组件
+        self.session_manager = SessionManager(self.instance_path)
+        self.message_bus = message_bus
 
-def get_session_details(
-    instance_name: str,
-    session_id: str,
-    instances_root: Optional[Path] = None,
-    include_messages: bool = False,
-    message_limit: Optional[int] = 100
-) -> Dict[str, Any]:
-    """
-    获取会话详情
+        # 订阅相关状态
+        self.child_sessions: Dict[str, str] = {}
+        self.subscription_tasks: List[asyncio.Task] = []
+        self._running = False
+        self._stopped = False
 
-    Args:
-        instance_name: 实例名称
-        session_id: 会话 ID
-        instances_root: 实例根目录
-        include_messages: 是否包含消息内容
-        message_limit: 消息数量限制
+        # 回调函数
+        self.on_parent_message: Optional[Callable[[Any], None]] = None
+        self.on_child_message: Optional[Callable[[str, str, Any], None]] = None
+        self.on_child_started: Optional[Callable[[str, str], None]] = None
 
-    Returns:
-        会话详情字典，包含：
-        - metadata: 会话元数据
-        - statistics: 统计信息
-        - messages: 消息列表（如果 include_messages=True）
-        - subsessions: 子会话列表（从 statistics.subsessions 读取）
+    # === 基础查询功能 ===
 
-    Raises:
-        AgentSystemError: 查询失败
-    """
-    try:
-        instance_path = _get_instance_path(instance_name, instances_root)
-        session_manager = SessionManager(instance_path)
+    def get_session_details(
+        self,
+        session_id: str,
+        include_messages: bool = False,
+        message_limit: Optional[int] = 100
+    ) -> Dict[str, Any]:
+        """
+        获取会话详情
 
-        # 获取会话对象
-        session = session_manager.get_session(session_id)
+        Args:
+            session_id: 会话 ID
+            include_messages: 是否包含消息内容
+            message_limit: 消息数量限制
 
-        # 读取元数据
-        metadata = session.get_metadata()
+        Returns:
+            会话详情字典
+        """
+        try:
+            session = self.session_manager.get_session(session_id)
 
-        # 读取统计信息
-        statistics_file = session.session_dir / "statistics.json"
-        if statistics_file.exists():
-            with open(statistics_file, 'r', encoding='utf-8') as f:
-                statistics = json.load(f)
-        else:
-            statistics = session.get_statistics()
+            # 读取元数据
+            metadata = session.get_metadata()
 
-        # 读取消息
-        messages = []
-        if include_messages:
-            messages = list(session.get_messages(limit=message_limit))
+            # 读取统计信息
+            statistics_file = session.session_dir / "statistics.json"
+            if statistics_file.exists():
+                with open(statistics_file, 'r', encoding='utf-8') as f:
+                    statistics = json.load(f)
+            else:
+                statistics = session.get_statistics()
 
-        # 获取子会话信息（从 statistics.json 中读取）
-        subsessions = []
-        if 'subsessions' in statistics and statistics['subsessions']:
-            for subsess_info in statistics['subsessions']:
-                subsessions.append({
-                    "session_id": subsess_info.get('session_id'),
-                    "tool_name": subsess_info.get('tool_name'),
-                    "tool_use_id": subsess_info.get('tool_use_id'),
-                    "timestamp": subsess_info.get('timestamp')
-                })
+            # 读取消息
+            messages = []
+            if include_messages:
+                messages = list(session.get_messages(limit=message_limit))
 
-        return {
-            "metadata": metadata,
-            "statistics": statistics,
-            "messages": messages,
-            "subsessions": subsessions
-        }
+            # 获取子会话信息（从 statistics.json 中读取）
+            subsessions = []
+            if 'subsessions' in statistics and statistics['subsessions']:
+                for subsess_info in statistics['subsessions']:
+                    subsessions.append({
+                        "session_id": subsess_info.get('session_id'),
+                        "tool_name": subsess_info.get('tool_name'),
+                        "tool_use_id": subsess_info.get('tool_use_id'),
+                        "timestamp": subsess_info.get('timestamp')
+                    })
 
-    except Exception as e:
-        raise AgentSystemError(f"获取会话详情失败: {e}")
+            return {
+                "metadata": metadata,
+                "statistics": statistics,
+                "messages": messages,
+                "subsessions": subsessions
+            }
 
+        except Exception as e:
+            raise AgentSystemError(f"获取会话详情失败: {e}")
 
-def list_sessions(
-    instance_name: str,
-    instances_root: Optional[Path] = None,
-    status: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0
-) -> List[Dict[str, Any]]:
-    """
-    列出会话
+    def list_sessions(
+        self,
+        status: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        列出会话（代理到 SessionManager）
 
-    Args:
-        instance_name: 实例名称
-        instances_root: 实例根目录
-        status: 状态过滤（running/completed/failed）
-        limit: 返回数量限制
-        offset: 偏移量
+        Args:
+            status: 状态过滤（running/completed/failed）
+            limit: 返回数量限制
+            offset: 偏移量
 
-    Returns:
-        会话元数据列表
-
-    Raises:
-        AgentSystemError: 查询失败
-    """
-    try:
-        instance_path = _get_instance_path(instance_name, instances_root)
-        session_manager = SessionManager(instance_path)
-
-        return session_manager.list_sessions(
+        Returns:
+            会话元数据列表
+        """
+        return self.session_manager.list_sessions(
             status=status,
             limit=limit,
             offset=offset
         )
 
-    except Exception as e:
-        raise AgentSystemError(f"列出会话失败: {e}")
+    def get_session_messages(
+        self,
+        session_id: str,
+        message_types: Optional[List[str]] = None,
+        limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        获取会话消息
 
+        Args:
+            session_id: 会话 ID
+            message_types: 过滤消息类型
+            limit: 限制返回数量
 
-def search_sessions(
-    instance_name: str,
-    query: str,
-    instances_root: Optional[Path] = None,
-    field: str = "initial_prompt",
-    limit: int = 10
-) -> List[Dict[str, Any]]:
-    """
-    搜索会话
+        Returns:
+            消息列表
+        """
+        try:
+            session = self.session_manager.get_session(session_id)
+            return list(session.get_messages(
+                message_types=message_types,
+                limit=limit
+            ))
+        except Exception as e:
+            raise AgentSystemError(f"获取会话消息失败: {e}")
 
-    Args:
-        instance_name: 实例名称
-        query: 搜索关键词
-        instances_root: 实例根目录
-        field: 搜索字段（initial_prompt/result）
-        limit: 返回数量限制
+    # === 高级查询功能 ===
 
-    Returns:
-        匹配的会话元数据列表
+    def search_sessions(
+        self,
+        query: str,
+        field: str = "initial_prompt",
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        搜索会话
 
-    Raises:
-        AgentSystemError: 搜索失败
-    """
-    try:
-        instance_path = _get_instance_path(instance_name, instances_root)
-        session_manager = SessionManager(instance_path)
+        Args:
+            query: 搜索关键词
+            field: 搜索字段（initial_prompt/result）
+            limit: 返回数量限制
 
-        # 获取所有会话
-        all_sessions = session_manager.list_sessions(limit=1000)
+        Returns:
+            匹配的会话元数据列表
+        """
+        try:
+            # 获取所有会话
+            all_sessions = self.session_manager.list_sessions(limit=1000)
 
-        # 搜索匹配
-        matched_sessions = []
+            # 搜索匹配
+            return search_sessions_in_list(all_sessions, query, field, limit)
+        except Exception as e:
+            raise AgentSystemError(f"搜索会话失败: {e}")
 
-        for session_meta in all_sessions:
-            match_found = False
+    def get_statistics_summary(self, recent_days: Optional[int] = None) -> Dict[str, Any]:
+        """
+        获取会话统计摘要
 
-            if field == "initial_prompt":
-                # 搜索初始提示词
-                if 'prompts' in session_meta and session_meta['prompts']:
-                    first_prompt = session_meta['prompts'][0].get('prompt', '')
-                    if query.lower() in first_prompt.lower():
-                        match_found = True
+        Args:
+            recent_days: 只统计最近N天的会话（可选）
 
-            elif field == "result":
-                # 搜索结果
-                if 'results' in session_meta and session_meta['results']:
-                    for result in session_meta['results']:
-                        if query.lower() in result.get('result', '').lower():
-                            match_found = True
-                            break
+        Returns:
+            统计摘要字典
+        """
+        try:
+            # 获取所有会话
+            all_sessions = self.session_manager.list_sessions(limit=10000)
 
-            if match_found:
-                matched_sessions.append(session_meta)
+            # 计算统计信息
+            return calculate_session_statistics(all_sessions, self.session_manager, recent_days)
+        except Exception as e:
+            raise AgentSystemError(f"获取统计摘要失败: {e}")
 
-            if len(matched_sessions) >= limit:
-                break
+    def export_session(
+        self,
+        session_id: str,
+        output_file: Path,
+        format: str = "json",
+        include_messages: bool = True
+    ) -> None:
+        """
+        导出会话到文件
 
-        return matched_sessions
+        Args:
+            session_id: 会话 ID
+            output_file: 输出文件路径
+            format: 输出格式（json/jsonl/text）
+            include_messages: 是否包含消息
+        """
+        try:
+            # 获取会话数据
+            data = self.get_session_details(
+                session_id=session_id,
+                include_messages=include_messages
+            )
 
-    except Exception as e:
-        raise AgentSystemError(f"搜索会话失败: {e}")
+            # 写入文件
+            if format == "json":
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
 
+            elif format == "jsonl":
+                export_session_to_jsonl(output_file, data, include_messages)
 
-def get_session_statistics_summary(
-    instance_name: str,
-    instances_root: Optional[Path] = None,
-    recent_days: Optional[int] = None
-) -> Dict[str, Any]:
-    """
-    获取会话统计摘要
+            elif format == "text":
+                export_session_to_text(output_file, session_id, data)
 
-    Args:
-        instance_name: 实例名称
-        instances_root: 实例根目录
-        recent_days: 只统计最近N天的会话（可选）
+            logger.info(f"已导出会话到: {output_file}")
 
-    Returns:
-        统计摘要字典，包含：
-        - total_sessions: 总会话数
-        - completed_sessions: 完成的会话数
-        - failed_sessions: 失败的会话数
-        - total_messages: 总消息数
-        - total_tool_calls: 总工具调用数
-        - total_cost_usd: 总成本
-        - avg_duration_ms: 平均耗时
+        except Exception as e:
+            raise AgentSystemError(f"导出会话失败: {e}")
 
-    Raises:
-        AgentSystemError: 查询失败
-    """
-    try:
-        instance_path = _get_instance_path(instance_name, instances_root)
-        session_manager = SessionManager(instance_path)
+    # === 管理功能 ===
 
-        # 获取所有会话
-        all_sessions = session_manager.list_sessions(limit=10000)
+    def cleanup_sessions(
+        self,
+        retention_days: int = 30,
+        dry_run: bool = False
+    ) -> Dict[str, Any]:
+        """
+        清理过期会话（代理到 SessionManager）
 
-        # 过滤时间范围
-        if recent_days:
-            cutoff_time = datetime.now().timestamp() - (recent_days * 24 * 60 * 60)
-            filtered_sessions = []
-            for session_meta in all_sessions:
-                start_time_str = session_meta.get('start_time')
-                if start_time_str:
-                    start_time = datetime.fromisoformat(start_time_str).timestamp()
-                    if start_time >= cutoff_time:
-                        filtered_sessions.append(session_meta)
-            all_sessions = filtered_sessions
+        Args:
+            retention_days: 保留天数
+            dry_run: 是否模拟运行（不实际删除）
 
-        # 统计
-        total_sessions = len(all_sessions)
-        completed_sessions = 0
-        failed_sessions = 0
-        total_messages = 0
-        total_tool_calls = 0
-        total_cost_usd = 0.0
-        total_duration_ms = 0
-        duration_count = 0
+        Returns:
+            清理报告
+        """
+        return self.session_manager.cleanup_old_sessions(retention_days, dry_run)
 
-        for session_meta in all_sessions:
-            status = session_meta.get('status', 'unknown')
-            if status == 'completed':
-                completed_sessions += 1
-            elif status == 'failed':
-                failed_sessions += 1
+    # === 订阅功能 ===
 
-            # 读取统计信息
-            session_id = session_meta.get('session_id')
-            try:
-                session = session_manager.get_session(session_id)
-                stats_file = session.session_dir / "statistics.json"
-                if stats_file.exists():
-                    with open(stats_file, 'r', encoding='utf-8') as f:
-                        stats = json.load(f)
+    async def subscribe(
+        self,
+        session_id: str,
+        on_parent_message: Optional[Callable[[Any], None]] = None,
+        on_child_message: Optional[Callable[[str, str, Any], None]] = None,
+        on_child_started: Optional[Callable[[str, str], None]] = None,
+        auto_start: bool = True
+    ) -> None:
+        """
+        开始订阅会话消息
 
-                    total_messages += stats.get('num_messages', 0)
-                    total_tool_calls += stats.get('num_tool_calls', 0)
-                    total_cost_usd += stats.get('cost_usd', 0) or 0
+        Args:
+            session_id: 要订阅的会话 ID
+            on_parent_message: 父实例消息回调
+            on_child_message: 子实例消息回调
+            on_child_started: 子实例启动回调
+            auto_start: 是否自动启动订阅任务
+        """
+        if not self.message_bus:
+            raise AgentSystemError("未配置 MessageBus，无法使用订阅功能")
 
-                    duration = stats.get('total_duration_ms', 0)
-                    if duration > 0:
-                        total_duration_ms += duration
-                        duration_count += 1
-            except Exception as e:
-                logger.warning(f"读取会话统计失败 {session_id}: {e}")
+        if self._running:
+            logger.warning("订阅器已在运行")
+            return
 
-        avg_duration_ms = total_duration_ms / duration_count if duration_count > 0 else 0
+        self.session_id = session_id
+        self.on_parent_message = on_parent_message
+        self.on_child_message = on_child_message
+        self.on_child_started = on_child_started
 
-        return {
-            "total_sessions": total_sessions,
-            "completed_sessions": completed_sessions,
-            "failed_sessions": failed_sessions,
-            "running_sessions": total_sessions - completed_sessions - failed_sessions,
-            "total_messages": total_messages,
-            "total_tool_calls": total_tool_calls,
-            "total_cost_usd": round(total_cost_usd, 4),
-            "avg_duration_ms": round(avg_duration_ms, 2),
-            "recent_days": recent_days
-        }
+        if auto_start:
+            await self.start()
 
-    except Exception as e:
-        raise AgentSystemError(f"获取统计摘要失败: {e}")
+    async def start(self) -> None:
+        """启动订阅任务"""
+        if not self.message_bus:
+            raise AgentSystemError("未配置 MessageBus，无法启动订阅")
 
+        if self._running:
+            return
 
-def export_session(
-    instance_name: str,
-    session_id: str,
-    output_file: Path,
-    instances_root: Optional[Path] = None,
-    format: str = "json",
-    include_messages: bool = True
-) -> None:
-    """
-    导出会话到文件
+        self._running = True
+        self._stopped = False
 
-    Args:
-        instance_name: 实例名称
-        session_id: 会话 ID
-        output_file: 输出文件路径
-        instances_root: 实例根目录
-        format: 输出格式（json/jsonl/text）
-        include_messages: 是否包含消息
+        logger.info(f"[SessionQuery] 开始订阅 session: {self.session_id}")
 
-    Raises:
-        AgentSystemError: 导出失败
-    """
-    try:
-        instance_path = _get_instance_path(instance_name, instances_root)
-        session_manager = SessionManager(instance_path)
+        # 启动父会话订阅任务
+        parent_task = asyncio.create_task(self._subscribe_parent())
+        self.subscription_tasks.append(parent_task)
 
-        session = session_manager.get_session(session_id)
+    async def stop(self) -> None:
+        """停止所有订阅任务"""
+        if self._stopped:
+            return
 
-        # 收集数据
-        data = {
-            "metadata": session.get_metadata(),
-            "statistics": session.get_statistics()
-        }
+        logger.info(f"[SessionQuery] 停止订阅 session: {self.session_id}")
 
-        if include_messages:
-            data["messages"] = list(session.get_messages())
+        self._running = False
+        self._stopped = True
 
-        # 写入文件
-        if format == "json":
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+        # 取消所有订阅任务
+        for task in self.subscription_tasks:
+            if not task.done():
+                task.cancel()
 
-        elif format == "jsonl":
-            with open(output_file, 'w', encoding='utf-8') as f:
-                # 写入元数据
-                json.dump({"type": "metadata", "data": data["metadata"]}, f, ensure_ascii=False)
-                f.write('\n')
-                # 写入统计信息
-                json.dump({"type": "statistics", "data": data["statistics"]}, f, ensure_ascii=False)
-                f.write('\n')
-                # 写入消息
-                if include_messages:
-                    for msg in data["messages"]:
-                        json.dump({"type": "message", "data": msg}, f, ensure_ascii=False)
-                        f.write('\n')
+        # 等待所有任务完成
+        if self.subscription_tasks:
+            await asyncio.gather(*self.subscription_tasks, return_exceptions=True)
 
-        elif format == "text":
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(f"=== Session: {session_id} ===\n\n")
-                f.write(f"Instance: {data['metadata']['instance_name']}\n")
-                f.write(f"Status: {data['metadata']['status']}\n")
-                f.write(f"Start Time: {data['metadata']['start_time']}\n")
-                f.write(f"End Time: {data['metadata'].get('end_time', 'N/A')}\n")
-                f.write(f"\n=== Statistics ===\n")
-                f.write(f"Messages: {data['statistics']['num_messages']}\n")
-                f.write(f"Tool Calls: {data['statistics']['num_tool_calls']}\n")
-                f.write(f"Duration: {data['statistics']['total_duration_ms']}ms\n")
-                f.write(f"Cost: ${data['statistics'].get('cost_usd', 0)}\n")
+        self.subscription_tasks.clear()
+        logger.info(f"[SessionQuery] 已停止所有订阅")
 
-                if include_messages:
-                    f.write(f"\n=== Messages ===\n")
-                    for msg in data["messages"]:
-                        f.write(f"\n[{msg['seq']}] {msg['message_type']} @ {msg['timestamp']}\n")
+    async def wait(self) -> None:
+        """等待所有订阅任务完成"""
+        if self.subscription_tasks:
+            await asyncio.gather(*self.subscription_tasks, return_exceptions=True)
 
-        logger.info(f"已导出会话到: {output_file}")
+    def get_child_sessions(self) -> Dict[str, str]:
+        """获取所有子会话"""
+        return self.child_sessions.copy()
 
-    except Exception as e:
-        raise AgentSystemError(f"导出会话失败: {e}")
+    def is_running(self) -> bool:
+        """检查订阅器是否正在运行"""
+        return self._running
 
+    # === 会话树功能 ===
 
-def cleanup_sessions(
-    instance_name: str,
-    instances_root: Optional[Path] = None,
-    retention_days: int = 30,
-    dry_run: bool = False
-) -> Dict[str, Any]:
-    """
-    清理过期会话
+    async def build_session_tree(
+        self,
+        session_id: str,
+        instance_name: Optional[str] = None,
+        include_messages: bool = True,
+        max_depth: int = 10
+    ) -> Dict[str, Any]:
+        """
+        递归构建会话树
 
-    Args:
-        instance_name: 实例名称
-        instances_root: 实例根目录
-        retention_days: 保留天数
-        dry_run: 是否模拟运行（不实际删除）
+        Args:
+            session_id: 会话 ID
+            instance_name: 实例名称（可选，如果不提供则自动推断）
+            include_messages: 是否包含消息内容
+            max_depth: 最大递归深度
 
-    Returns:
-        清理报告
+        Returns:
+            会话树字典
+        """
+        from ..utils import infer_instance_name, extract_instance_from_tool_name
 
-    Raises:
-        AgentSystemError: 清理失败
-    """
-    try:
-        instance_path = _get_instance_path(instance_name, instances_root)
-        session_manager = SessionManager(instance_path)
+        # 推断实例名称（如果未提供）
+        if instance_name is None:
+            instance_name = infer_instance_name(session_id, self.instances_root)
 
-        return session_manager.cleanup_old_sessions(
-            retention_days=retention_days,
-            dry_run=dry_run
+        if instance_name is None:
+            raise ValueError(f"无法推断会话 {session_id} 的实例名称，请手动指定")
+
+        # 1. 获取会话详情
+        details = self.get_session_details(
+            session_id=session_id,
+            include_messages=include_messages
         )
 
-    except Exception as e:
-        raise AgentSystemError(f"清理会话失败: {e}")
+        # 2. 构建当前节点
+        tree_node = build_tree_node(session_id, instance_name, details, include_messages)
+
+        # 3. 递归构建子会话树
+        if max_depth > 0 and details.get("subsessions"):
+            for subsess_info in details["subsessions"]:
+                child_session_id = subsess_info.get('session_id')
+                if not child_session_id:
+                    continue
+
+                # 从工具名称推断子实例名称
+                tool_name = subsess_info.get('tool_name', "")
+                child_instance_name = extract_instance_from_tool_name(tool_name, self.instances_root)
+
+                if child_instance_name:
+                    try:
+                        child_tree = await self.build_session_tree(
+                            session_id=child_session_id,
+                            instance_name=child_instance_name,
+                            include_messages=include_messages,
+                            max_depth=max_depth - 1
+                        )
+                        tree_node["subsessions"].append(child_tree)
+                    except Exception as e:
+                        logger.warning(f"构建子会话树失败 {child_session_id}: {e}")
+                        # 添加错误节点
+                        tree_node["subsessions"].append({
+                            "session_id": child_session_id,
+                            "instance_name": child_instance_name,
+                            "error": str(e)
+                        })
+                else:
+                    logger.warning(f"无法从工具名称 {tool_name} 推断实例名称")
+
+        return tree_node
+
+    def flatten_tree(self, tree: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        将树形结构展平为列表
+
+        Args:
+            tree: 会话树
+
+        Returns:
+            会话列表（按深度优先顺序）
+        """
+        return flatten_tree_to_list(tree)
+
+    # === 内部订阅方法 ===
+
+    async def _subscribe_parent(self) -> None:
+        """订阅父会话消息（内部方法）"""
+        channel = f"session:{self.session_id}"
+        logger.info(f"[SessionQuery] 订阅父频道: {channel}")
+
+        try:
+            async for message in self.message_bus.subscribe(channel):
+                if self._stopped:
+                    break
+
+                # 检查是否是子实例启动通知
+                if isinstance(message, dict) and message.get("type") == "sub_instance_started":
+                    logger.info(f"[SessionQuery] 检测到子实例启动通知: {message}")
+                    await self._handle_child_started(message)
+                else:
+                    # 普通消息，调用父实例消息回调
+                    logger.debug(f"[SessionQuery] 收到父会话消息: {type(message)} - {str(message)[:100]}")
+                    if self.on_parent_message:
+                        try:
+                            if asyncio.iscoroutinefunction(self.on_parent_message):
+                                await self.on_parent_message(message)
+                            else:
+                                self.on_parent_message(message)
+                        except Exception as e:
+                            logger.error(f"[SessionQuery] 父消息回调错误: {e}", exc_info=True)
+
+        except asyncio.CancelledError:
+            logger.info(f"[SessionQuery] 父会话订阅已取消: {self.session_id}")
+        except Exception as e:
+            logger.error(f"[SessionQuery] 父会话订阅错误: {e}", exc_info=True)
+
+    async def _handle_child_started(self, notification: Dict[str, Any]) -> None:
+        """处理子实例启动通知（内部方法）"""
+        child_session_id = notification.get("child_session_id")
+        child_instance_name = notification.get("child_instance_name")
+
+        if not child_session_id:
+            logger.warning(f"[SessionQuery] 子实例启动通知缺少 child_session_id")
+            return
+
+        logger.info(
+            f"[SessionQuery] 🔔 子实例启动: {child_session_id} ({child_instance_name})"
+        )
+
+        # 记录子会话
+        self.child_sessions[child_session_id] = child_instance_name
+
+        # 调用子实例启动回调
+        if self.on_child_started:
+            try:
+                if asyncio.iscoroutinefunction(self.on_child_started):
+                    await self.on_child_started(child_session_id, child_instance_name)
+                else:
+                    self.on_child_started(child_session_id, child_instance_name)
+            except Exception as e:
+                logger.error(f"[SessionQuery] 子实例启动回调错误: {e}", exc_info=True)
+
+        # 自动订阅子会话
+        if self.on_child_message:
+            task = asyncio.create_task(
+                self._subscribe_child(child_session_id, child_instance_name)
+            )
+            self.subscription_tasks.append(task)
+
+    async def _subscribe_child(self, child_session_id: str, instance_name: str) -> None:
+        """订阅子会话消息（内部方法）"""
+        channel = f"session:{child_session_id}"
+        logger.info(f"[SessionQuery] 订阅子频道: {channel} ({instance_name})")
+
+        try:
+            async for message in self.message_bus.subscribe(channel):
+                if self._stopped:
+                    break
+
+                # 记录收到的子会话消息
+                logger.debug(f"[SessionQuery] 收到子会话消息 ({instance_name}): {type(message)} - {str(message)[:100]}")
+
+                # 调用子实例消息回调
+                if self.on_child_message:
+                    try:
+                        if asyncio.iscoroutinefunction(self.on_child_message):
+                            await self.on_child_message(child_session_id, instance_name, message)
+                        else:
+                            self.on_child_message(child_session_id, instance_name, message)
+                    except Exception as e:
+                        logger.error(
+                            f"[SessionQuery] 子消息回调错误 ({instance_name}): {e}",
+                            exc_info=True
+                        )
+
+        except asyncio.CancelledError:
+            logger.info(f"[SessionQuery] 子会话订阅已取消: {child_session_id} ({instance_name})")
+        except Exception as e:
+            logger.error(
+                f"[SessionQuery] 子会话订阅错误 ({instance_name}): {e}",
+                exc_info=True
+            )
+
+    def __repr__(self) -> str:
+        return (
+            f"SessionQuery(instance='{self.instance_name}', "
+            f"child_count={len(self.child_sessions)}, "
+            f"running={self._running})"
+        )
 
 
-def get_session_messages(
-    instance_name: str,
-    session_id: str,
-    instances_root: Optional[Path] = None,
-    message_types: Optional[List[str]] = None,
-    limit: Optional[int] = None
-) -> List[Dict[str, Any]]:
-    """
-    获取会话消息
+# === 向后兼容的函数别名 ===
 
-    Args:
-        instance_name: 实例名称
-        session_id: 会话 ID
-        instances_root: 实例根目录
-        message_types: 过滤消息类型
-        limit: 限制返回数量
+def get_session_details(*args, **kwargs) -> Dict[str, Any]:
+    """向后兼容的函数别名"""
+    # 从参数中提取 instance_name 和 session_id
+    if len(args) >= 2:
+        instance_name = args[0]
+        session_id = args[1]
+    else:
+        instance_name = kwargs.get('instance_name')
+        session_id = kwargs.get('session_id')
 
-    Returns:
-        消息列表
-
-    Raises:
-        AgentSystemError: 查询失败
-    """
-    try:
-        instance_path = _get_instance_path(instance_name, instances_root)
-        session_manager = SessionManager(instance_path)
-
-        session = session_manager.get_session(session_id)
-
-        return list(session.get_messages(
-            message_types=message_types,
-            limit=limit
-        ))
-
-    except Exception as e:
-        raise AgentSystemError(f"获取会话消息失败: {e}")
+    query = SessionQuery(instance_name, kwargs.get('instances_root'))
+    return query.get_session_details(session_id, kwargs.get('include_messages', False), kwargs.get('message_limit', 100))
 
 
-# =====================================================
-# 实时订阅 API（新增）
-# =====================================================
-
-async def subscribe_session_messages(
-    session_id: str,
-    message_bus: "MessageBus"
-) -> AsyncIterator[Dict[str, Any]]:
-    """
-    订阅特定会话的实时消息流
-
-    Args:
-        session_id: 会话 ID
-        message_bus: MessageBus 实例
-
-    Yields:
-        消息事件字典，格式：
-        {
-            "event_type": "message_created",
-            "timestamp": "2025-12-16T10:30:00",
-            "instance_name": "demo_agent",
-            "session_id": "xxx",
-            "parent_session_id": "yyy",
-            "depth": 0,
-            "seq": 42,
-            "message_type": "AssistantMessage",
-            "data": {...}
-        }
-
-    Raises:
-        AgentSystemError: MessageBus 未连接
-    """
-    if not message_bus or not message_bus.is_connected:
-        raise AgentSystemError("MessageBus 未连接，无法订阅实时消息")
-
-    channel = f"messages:session:{session_id}"
-    logger.info(f"订阅会话消息: {session_id}")
-
-    try:
-        async for event in message_bus.subscribe(channel):
-            yield event
-    except Exception as e:
-        logger.error(f"订阅会话消息失败: {e}")
-        raise AgentSystemError(f"订阅会话消息失败: {e}")
+def list_sessions(*args, **kwargs) -> List[Dict[str, Any]]:
+    """向后兼容的函数别名"""
+    instance_name = args[0] if args else kwargs.get('instance_name')
+    query = SessionQuery(instance_name, kwargs.get('instances_root'))
+    return query.list_sessions(kwargs.get('status'), kwargs.get('limit', 100), kwargs.get('offset', 0))
 
 
-async def subscribe_instance_messages(
-    instance_name: str,
-    message_bus: "MessageBus"
-) -> AsyncIterator[Dict[str, Any]]:
-    """
-    订阅特定实例的所有实时消息
-
-    Args:
-        instance_name: 实例名称
-        message_bus: MessageBus 实例
-
-    Yields:
-        消息事件字典（格式同 subscribe_session_messages）
-
-    Raises:
-        AgentSystemError: MessageBus 未连接
-    """
-    if not message_bus or not message_bus.is_connected:
-        raise AgentSystemError("MessageBus 未连接，无法订阅实时消息")
-
-    channel = f"messages:instance:{instance_name}"
-    logger.info(f"订阅实例消息: {instance_name}")
-
-    try:
-        async for event in message_bus.subscribe(channel):
-            yield event
-    except Exception as e:
-        logger.error(f"订阅实例消息失败: {e}")
-        raise AgentSystemError(f"订阅实例消息失败: {e}")
+def search_sessions(*args, **kwargs) -> List[Dict[str, Any]]:
+    """向后兼容的函数别名"""
+    instance_name = args[0] if args else kwargs.get('instance_name')
+    query = SessionQuery(instance_name, kwargs.get('instances_root'))
+    return query.search_sessions(args[1] if len(args) > 1 else kwargs.get('query'), kwargs.get('field', 'initial_prompt'), kwargs.get('limit', 10))
 
 
-# 简化别名
+def get_session_statistics_summary(*args, **kwargs) -> Dict[str, Any]:
+    """向后兼容的函数别名"""
+    instance_name = args[0] if args else kwargs.get('instance_name')
+    query = SessionQuery(instance_name, kwargs.get('instances_root'))
+    return query.get_statistics_summary(kwargs.get('recent_days'))
+
+
+def export_session(*args, **kwargs) -> None:
+    """向后兼容的函数别名"""
+    instance_name = args[0] if args else kwargs.get('instance_name')
+    session_id = args[1] if len(args) > 1 else kwargs.get('session_id')
+    output_file = args[2] if len(args) > 2 else kwargs.get('output_file')
+
+    query = SessionQuery(instance_name, kwargs.get('instances_root'))
+    return query.export_session(
+        session_id,
+        output_file,
+        kwargs.get('format', 'json'),
+        kwargs.get('include_messages', True)
+    )
+
+
+def cleanup_sessions(*args, **kwargs) -> Dict[str, Any]:
+    """向后兼容的函数别名"""
+    instance_name = args[0] if args else kwargs.get('instance_name')
+    query = SessionQuery(instance_name, kwargs.get('instances_root'))
+    return query.cleanup_sessions(kwargs.get('retention_days', 30), kwargs.get('dry_run', False))
+
+
+def get_session_messages(*args, **kwargs) -> List[Dict[str, Any]]:
+    """向后兼容的函数别名"""
+    instance_name = args[0] if args else kwargs.get('instance_name')
+    session_id = args[1] if len(args) > 1 else kwargs.get('session_id')
+
+    query = SessionQuery(instance_name, kwargs.get('instances_root'))
+    return query.get_session_messages(session_id, kwargs.get('message_types'), kwargs.get('limit'))
+
+
+# === 简化别名（保持兼容性） ===
 get_details = get_session_details
 list_all = list_sessions
 search = search_sessions

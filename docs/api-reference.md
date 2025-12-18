@@ -113,6 +113,86 @@ print(f"结果: {result.result}")
 print(f"会话ID: {result.session_id}")
 ```
 
+#### 使用实时消息（新架构）
+
+```python
+import asyncio
+from src import AgentSystem
+from src.session import MessageBus, SessionQuery
+
+async def main():
+    # 创建 MessageBus
+    message_bus = MessageBus.from_config()
+    await message_bus.connect()
+
+    try:
+        # 创建 Agent
+        agent = AgentSystem("demo_agent", message_bus=message_bus)
+        await agent.initialize()
+
+        # 执行查询（后台运行）
+        query_task = asyncio.create_task(
+            agent.query_text("请调用子实例分析项目")
+        )
+
+        # 等待 session 创建
+        await asyncio.sleep(1.0)
+
+        # 获取 session_id 并开始订阅
+        from src.session.utils import SessionContext
+        session_id = SessionContext.get_current_session()
+
+        if session_id:
+            # 🎉 新的统一查询服务
+            query = SessionQuery("demo_agent", message_bus=message_bus)
+
+            # 开始订阅（自动追踪子实例）
+            await query.subscribe(
+                session_id=session_id,
+                on_parent_message=lambda msg: print(f"[父消息] {msg['type']}"),
+                on_child_message=lambda child_id, instance, msg: print(
+                    f"[子消息-{instance}] {msg['type']}"
+                ),
+                on_child_started=lambda child_id, instance: print(
+                    f"🔔 子实例启动: {instance}"
+                )
+            )
+
+            # 等待查询完成
+            result = await query_task
+            await query.stop()
+
+        agent.cleanup()
+    finally:
+        await message_bus.close()
+
+asyncio.run(main())
+```
+
+#### 会话查询示例（新架构）
+
+```python
+from src.session import SessionQuery
+
+# 创建查询实例
+query = SessionQuery("demo_agent")
+
+# 基础查询
+details = query.get_session_details("20241218T140000_1000_parent123")
+sessions = query.list_sessions(status="completed")
+
+# 高级查询
+results = query.search_sessions("文件分析", field="initial_prompt")
+stats = query.get_statistics_summary(recent_days=7)
+
+# 会话树构建
+tree = await query.build_session_tree("parent_session_id")
+flat_list = query.flatten_tree(tree)
+
+# 导出功能
+query.export_session("session_id", Path("export.json"), format="json")
+```
+
 #### cleanup()
 
 ```python
@@ -235,9 +315,310 @@ def merge_mcp_configs(
 
 ## 会话系统 API
 
+### SessionQuery 🌟
+
+> **重要说明**：SessionQuery 是新架构的**统一查询服务**，整合了会话查询、实时消息订阅和会话树构建功能。推荐使用 SessionQuery 作为主要接口。
+
+SessionQuery 提供完整的会话查询和实时订阅功能。
+
+#### 构造函数
+
+```python
+class SessionQuery:
+    def __init__(
+        self,
+        instance_name: str,
+        instances_root: Optional[Path] = None,
+        message_bus: Optional["MessageBus"] = None
+    ):
+```
+
+**参数**:
+- `instance_name` (str): 实例名称
+- `instances_root` (Optional[Path]): 实例根目录路径
+- `message_bus` (Optional["MessageBus"]): 消息总线实例，用于实时订阅
+
+### 基础查询功能
+
+#### get_session_details()
+
+```python
+def get_session_details(
+    self,
+    session_id: str,
+    include_messages: bool = False,
+    message_limit: Optional[int] = 100
+) -> Dict[str, Any]:
+```
+
+获取会话的完整信息，包括元数据、统计信息、消息和子会话。
+
+**参数**:
+- `session_id` (str): 会话 ID
+- `include_messages` (bool): 是否包含消息内容（默认 False）
+- `message_limit` (Optional[int]): 消息数量限制（默认 100）
+
+**返回**:
+```python
+{
+    "metadata": {
+        "session_id": "20241218T140000_1000_abc123",
+        "instance_name": "demo_agent",
+        "start_time": "2024-12-18T14:00:00",
+        "status": "completed",
+        "depth": 0,
+        "parent_session_id": null
+    },
+    "statistics": {
+        "num_messages": 15,
+        "num_tool_calls": 5,
+        "total_duration_ms": 2500,
+        "cost_usd": 0.025
+    },
+    "messages": [...],  # 如果 include_messages=True
+    "subsessions": [...]  # 子会话信息
+}
+```
+
+#### get_session_messages()
+
+```python
+def get_session_messages(
+    self,
+    session_id: str,
+    message_types: Optional[List[str]] = None,
+    limit: int = 1000
+) -> List[Dict[str, Any]]:
+```
+
+获取会话的详细消息列表。
+
+**参数**:
+- `session_id` (str): 会话 ID
+- `message_types` (Optional[List[str]]): 过滤消息类型，如 ["ToolUseMessage", "ResultMessage"]
+- `limit` (int): 限制返回数量
+
+**返回**:
+- `List[Dict[str, Any]]`: 消息列表
+
+#### list_sessions()
+
+```python
+def list_sessions(
+    self,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0
+) -> List[Dict[str, Any]]:
+```
+
+列出会话，支持过滤和分页。
+
+**参数**:
+- `status` (Optional[str]): 状态过滤 (`running/completed/failed`)
+- `limit` (int): 返回数量限制
+- `offset` (int): 偏移量
+
+**返回**:
+- `List[Dict[str, Any]]`: 会话列表
+
+### 高级查询功能
+
+#### search_sessions()
+
+```python
+def search_sessions(
+    self,
+    query: str,
+    field: str = "initial_prompt",
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+```
+
+在会话中搜索关键词。
+
+**参数**:
+- `query` (str): 搜索关键词
+- `field` (str): 搜索字段 (`initial_prompt/result`)
+- `limit` (int): 返回数量限制
+
+**返回**:
+- `List[Dict[str, Any]]`: 搜索结果
+
+#### get_statistics_summary()
+
+```python
+def get_statistics_summary(self, recent_days: Optional[int] = None) -> Dict[str, Any]:
+```
+
+获取会话统计摘要。
+
+**参数**:
+- `recent_days` (Optional[int]): 只统计最近N天的会话（可选，None 表示统计全部）
+
+**返回统计信息**:
+- 总会话数、完成数、失败数
+- 总消息数、工具调用数
+- 总成本、平均耗时
+
+#### export_session()
+
+```python
+def export_session(
+    self,
+    session_id: str,
+    output_file: Path,
+    format: str = "json",
+    include_messages: bool = True
+) -> None:
+```
+
+将会话导出为文件。
+
+**参数**:
+- `session_id` (str): 会话 ID
+- `output_file` (Path): 输出文件路径
+- `format` (str): 导出格式（`json`, `jsonl`, `text`）
+- `include_messages` (bool): 是否包含消息内容
+
+**支持格式**:
+- `json`: 标准 JSON 格式
+- `jsonl`: JSON Lines 格式
+- `text`: 可读文本格式
+
+### 管理功能
+
+#### cleanup_sessions()
+
+```python
+def cleanup_sessions(
+    self,
+    retention_days: int = 30,
+    dry_run: bool = False
+) -> Dict[str, Any]:
+```
+
+清理过期会话（代理到 SessionManager）。
+
+**参数**:
+- `retention_days` (int): 保留天数（默认 30）
+- `dry_run` (bool): 是否模拟运行，不实际删除（默认 False）
+
+**返回**:
+- `Dict[str, Any]`: 清理报告，包含删除的会话数量和详细信息
+
+### 实时订阅功能 🚀
+
+#### subscribe()
+
+```python
+async def subscribe(
+    self,
+    session_id: str,
+    on_parent_message: Optional[Callable[[Any], None]] = None,
+    on_child_message: Optional[Callable[[str, str, Any], None]] = None,
+    on_child_started: Optional[Callable[[str, str], None]] = None,
+    auto_start: bool = True
+) -> None:
+```
+
+开始订阅会话消息，自动追踪子实例。
+
+**参数**:
+- `session_id` (str): 父会话 ID
+- `on_parent_message` (Optional[Callable[[Any], None]]): 父实例消息回调
+- `on_child_message` (Optional[Callable[[str, str, Any], None]]): 子实例消息回调
+- `on_child_started` (Optional[Callable[[str, str], None]]): 子实例启动回调
+- `auto_start` (bool): 是否自动启动订阅任务
+
+**回调函数参数**:
+- `on_parent_message`: `(message: Any) -> None`
+- `on_child_message`: `(child_session_id: str, instance_name: str, message: Any) -> None`
+- `on_child_started`: `(child_session_id: str, instance_name: str) -> None`
+
+**核心特性**:
+- ✅ 自动订阅所有子实例
+- ✅ 实时检测子实例启动
+- ✅ 区分父子消息来源
+- ✅ 支持多层嵌套
+
+#### 生命周期管理
+
+```python
+async def start(self) -> None:
+    """启动订阅任务"""
+
+async def stop(self) -> None:
+    """停止所有订阅"""
+
+async def wait(self, timeout: Optional[float] = None) -> None:
+    """等待订阅完成"""
+
+def is_running(self) -> bool:
+    """检查订阅器是否正在运行"""
+
+def get_child_sessions(self) -> Dict[str, str]:
+    """获取所有子会话 {child_session_id: instance_name}"""
+```
+
+### 会话树构建功能 🌳
+
+#### build_session_tree()
+
+```python
+async def build_session_tree(
+    self,
+    session_id: str,
+    instance_name: Optional[str] = None,
+    include_messages: bool = True,
+    max_depth: int = 10
+) -> Dict[str, Any]:
+```
+
+递归构建会话关系树。
+
+**参数**:
+- `session_id` (str): 根会话 ID
+- `instance_name` (Optional[str]): 实例名称（可选）
+- `include_messages` (bool): 是否包含消息内容
+- `max_depth` (int): 最大递归深度
+
+**返回**:
+```python
+{
+    "session_id": "parent_id",
+    "instance_name": "demo_agent",
+    "depth": 0,
+    "metadata": {...},
+    "statistics": {...},
+    "subsessions": [
+        {
+            "session_id": "child_id",
+            "instance_name": "file_analyzer",
+            "depth": 1,
+            "subsessions": [...]
+        }
+    ]
+}
+```
+
+#### flatten_tree()
+
+```python
+def flatten_tree(self, tree: Dict[str, Any]) -> List[Dict[str, Any]]:
+```
+
+将树形结构展平为列表。
+
+**参数**:
+- `tree` (Dict[str, Any]): 会话树
+
+**返回**:
+- `List[Dict[str, Any]]`: 展平后的会话列表
+
 ### Session
 
-会话对象，表示一次完整的对话。
+会话对象，表示一次完整的对话。（底层实现类，一般用户无需直接使用）
 
 #### 构造函数
 
@@ -255,13 +636,21 @@ class Session:
 
 #### 方法
 
+##### start()
+
+```python
+async def start(self) -> None:
+```
+
+初始化会话目录和元数据。
+
 ##### record_message()
 
 ```python
 async def record_message(self, message: Message) -> None:
 ```
 
-记录新消息。
+记录新消息，包含实时消息发布和异步写入。
 
 **参数**:
 - `message` (Message): 消息对象
@@ -269,10 +658,45 @@ async def record_message(self, message: Message) -> None:
 ##### finalize()
 
 ```python
-async def finalize(self) -> None:
+async def finalize(self, result_message: Optional[Message] = None) -> None:
 ```
 
 完成会话并写入统计数据。
+
+**参数**:
+- `result_message` (Optional[Message]): 最终结果消息
+
+##### get_messages()
+
+```python
+def get_messages(
+    self,
+    message_types: Optional[List[str]] = None,
+    limit: Optional[int] = None,
+    reverse: bool = False
+) -> Iterator[Dict[str, Any]]:
+```
+
+获取会话消息列表。
+
+**参数**:
+- `message_types` (Optional[List[str]]): 过滤消息类型
+- `limit` (Optional[int]): 限制返回数量
+- `reverse` (bool): 是否反转顺序
+
+**返回**:
+- `Iterator[Dict[str, Any]]`: 消息迭代器
+
+##### get_metadata()
+
+```python
+def get_metadata(self) -> Dict[str, Any]:
+```
+
+获取会话元数据。
+
+**返回**:
+- `Dict[str, Any]`: 元数据字典
 
 ##### get_statistics()
 
@@ -287,7 +711,7 @@ def get_statistics(self) -> Statistics:
 
 ### SessionManager
 
-会话管理器，负责创建和管理会话。
+会话管理器，负责创建和管理会话。（底层实现类，一般用户无需直接使用）
 
 #### 构造函数
 
@@ -306,8 +730,10 @@ class SessionManager:
 ##### create_session()
 
 ```python
-def create_session(
+async def create_session(
     self,
+    initial_prompt: str = "",
+    context: Optional[Dict[str, Any]] = None,
     parent_session_id: Optional[str] = None
 ) -> Session:
 ```
@@ -315,6 +741,8 @@ def create_session(
 创建新会话。
 
 **参数**:
+- `initial_prompt` (str): 初始提示词
+- `context` (Optional[Dict[str, Any]]): 上下文信息
 - `parent_session_id` (Optional[str]): 父会话ID
 
 **返回**:
@@ -339,7 +767,8 @@ def get_session(self, session_id: str) -> Optional[Session]:
 ```python
 def list_sessions(
     self,
-    limit: int = 50,
+    status: Optional[str] = None,
+    limit: int = 100,
     offset: int = 0
 ) -> List[Dict[str, Any]]:
 ```
@@ -347,17 +776,227 @@ def list_sessions(
 列出会话。
 
 **参数**:
-- `limit` (int): 限制数量
-- `offset` (int): 偏移量
+- `status` (Optional[str]): 状态过滤
+- `limit` (int): 限制数量（默认 100）
+- `offset` (int): 偏移量（默认 0）
 
 **返回**:
 - `List[Dict[str, Any]]`: 会话信息列表
+
+##### cleanup_old_sessions()
+
+```python
+def cleanup_old_sessions(
+    self,
+    retention_days: int = 30,
+    dry_run: bool = False
+) -> Dict[str, Any]:
+```
+
+清理过期会话。
+
+**参数**:
+- `retention_days` (int): 保留天数
+- `dry_run` (bool): 是否模拟运行
+
+**返回**:
+- `Dict[str, Any]`: 清理报告
+
+### QueryStreamManager
+
+查询流生命周期管理器，负责管理查询流和会话。（内部使用，一般用户无需直接操作）
+
+#### 构造函数
+
+```python
+class QueryStreamManager:
+    def __init__(
+        self,
+        stream: Any,
+        session_manager: Optional[SessionManager] = None,
+        record_session: bool = True,
+        prompt: Optional[str] = None,
+        resume_session_id: Optional[str] = None,
+        parent_session_id: Optional[str] = None,
+        instance_path: Optional[str] = None
+    ):
+```
+
+**参数**:
+- `stream` (Any): SDK 返回的查询流
+- `session_manager` (Optional[SessionManager]): 会话管理器
+- `record_session` (bool): 是否记录会话
+- `prompt` (Optional[str]): 查询提示词
+- `resume_session_id` (Optional[str]): 要恢复的会话 ID
+- `parent_session_id` (Optional[str]): 父会话 ID
+- `instance_path` (Optional[str]): 实例路径
+
+#### 方法
+
+##### initialize()
+
+```python
+async def initialize(self) -> None:
+```
+
+初始化 session（创建新会话或恢复已有会话）。
+
+##### finalize_on_result()
+
+```python
+async def finalize_on_result(self, result_message: Message) -> None:
+```
+
+在收到 ResultMessage 时 finalize（幂等操作）。
+
+**参数**:
+- `result_message` (Message): ResultMessage 对象
+
+##### 使用示例
+
+```python
+async with QueryStreamManager(stream, session_manager) as stream_manager:
+    async for message in stream_manager:
+        # 处理消息
+        pass
+```
+
+### SessionContext
+
+Session 上下文管理器，用于在进程间传递会话信息。使用临时文件存储当前查询的 session_id，允许 MCP 服务器子进程自动读取父 session_id。
+
+#### 类方法
+
+##### set_current_session()
+
+```python
+@classmethod
+def set_current_session(cls, session_id: str, instance_path: str) -> None:
+```
+
+设置当前会话上下文（写入临时文件）。
+
+**参数**:
+- `session_id` (str): 会话 ID
+- `instance_path` (str): 实例路径
+
+##### get_current_session()
+
+```python
+@classmethod
+def get_current_session(cls, pid: Optional[int] = None) -> Optional[str]:
+```
+
+获取当前会话 ID（从临时文件读取）。
+
+**参数**:
+- `pid` (Optional[int]): 进程 ID，默认使用当前进程
+
+**返回**:
+- `Optional[str]`: 会话 ID，如果不存在则返回 None
+
+##### clear_current_session()
+
+```python
+@classmethod
+def clear_current_session(cls, pid: Optional[int] = None) -> None:
+```
+
+清除当前会话上下文（删除临时文件）。
+
+**参数**:
+- `pid` (Optional[int]): 进程 ID，默认使用当前进程
+
+##### cleanup_all()
+
+```python
+@classmethod
+def cleanup_all(cls) -> None:
+```
+
+清理所有临时文件（启动时调用，清理上次未清理的文件）。
+
+### QueryStreamManager
+
+查询流生命周期管理器，负责管理查询流和会话。（内部使用，一般用户无需直接操作）
+
+#### 构造函数
+
+```python
+class QueryStreamManager:
+    def __init__(
+        self,
+        stream: Any,
+        session_manager: Optional[Any] = None,
+        record_session: bool = True,
+        prompt: Optional[str] = None,
+        resume_session_id: Optional[str] = None,
+        parent_session_id: Optional[str] = None,
+        instance_path: Optional[str] = None
+    ):
+```
+
+**参数**:
+- `stream` (Any): SDK 返回的查询流
+- `session_manager` (Optional[Any]): SessionManager 对象
+- `record_session` (bool): 是否记录会话
+- `prompt` (Optional[str]): 查询提示词
+- `resume_session_id` (Optional[str]): 要恢复的会话 ID
+- `parent_session_id` (Optional[str]): 父会话 ID
+- `instance_path` (Optional[str]): 实例路径
+
+#### 方法
+
+##### initialize()
+
+```python
+async def initialize(self) -> None:
+```
+
+初始化 session（创建新会话或恢复已有会话）。
+
+##### finalize_on_result()
+
+```python
+async def finalize_on_result(self, result_message: Message) -> None:
+```
+
+在收到 ResultMessage 时 finalize（幂等操作）。
+
+**参数**:
+- `result_message` (Message): ResultMessage 对象
+
+##### 使用示例
+
+```python
+async with QueryStreamManager(stream, session_manager) as stream_manager:
+    async for message in stream_manager:
+        # 处理消息
+        pass
+```
 
 ## 消息总线 API
 
 ### MessageBus
 
 全局消息总线，负责 Redis Pub/Sub 消息的发布和订阅。
+
+#### 构造函数
+
+```python
+class MessageBus:
+    def __init__(
+        self,
+        redis_url: str = "redis://localhost:6379",
+        redis_db: int = 0,
+        max_connections: int = 50
+    ):
+```
+
+**参数**:
+- `redis_url` (str): Redis 连接 URL
+- `redis_db` (int): Redis 数据库编号
+- `max_connections` (int): 连接池最大连接数
 
 #### 类方法
 
@@ -371,7 +1010,9 @@ def from_config(
 ) -> 'MessageBus':
 ```
 
-从配置文件创建 MessageBus 实例。
+从配置文件或环境变量加载配置创建 MessageBus 实例。
+
+配置优先级：环境变量 > streaming.yaml > 默认值
 
 **参数**:
 - `config_path` (Optional[str]): 配置文件路径
@@ -392,21 +1033,13 @@ async def connect(self) -> bool:
 **返回**:
 - `bool`: 连接是否成功
 
-##### disconnect()
-
-```python
-async def disconnect(self) -> None:
-```
-
-断开 Redis 连接。
-
 ##### publish()
 
 ```python
 async def publish(
     self,
     channel: str,
-    message: Dict[str, Any]
+    message: dict
 ) -> bool:
 ```
 
@@ -414,7 +1047,7 @@ async def publish(
 
 **参数**:
 - `channel` (str): 频道名称
-- `message` (Dict[str, Any]): 消息内容
+- `message` (dict): 消息内容
 
 **返回**:
 - `bool`: 发布是否成功
@@ -425,7 +1058,7 @@ async def publish(
 async def subscribe(
     self,
     *channels: str
-) -> AsyncIterator[Dict[str, Any]]:
+) -> AsyncIterator[dict]:
 ```
 
 订阅一个或多个频道。
@@ -434,19 +1067,21 @@ async def subscribe(
 - `*channels` (str): 频道名称列表
 
 **返回**:
-- `AsyncIterator[Dict[str, Any]]`: 消息迭代器
+- `AsyncIterator[dict]`: 消息迭代器
 
 ##### close()
 
 ```python
-async def close(self) -> None:
+async def close(self):
 ```
 
-关闭消息总线，释放所有资源。
+关闭 Redis 连接。
 
 #### 属性
 
-- `is_connected` (bool): 连接状态
+- `is_connected` (bool): 是否已连接
+
+> **注意**：`SessionSubscriber` 已整合到 `SessionQuery` 中，推荐使用 `SessionQuery.subscribe()` 方法进行订阅。
 
 ## 查询 API
 
@@ -616,6 +1251,42 @@ async def tool_function(
 - **工具名**: `tool_name__function_name`
 - **MCP 名称**: `mcp__custom_tools__tool_name__function_name`
 
+### 工具管理器
+
+#### ToolManager
+
+工具管理器，负责自动发现和加载工具。
+
+##### 方法
+
+###### load_tools()
+
+```python
+def load_tools(self, tools_dir: Path) -> List[Callable]:
+```
+
+从指定目录加载所有工具。
+
+**参数**:
+- `tools_dir` (Path): 工具目录路径
+
+**返回**:
+- `List[Callable]`: 工具函数列表
+
+###### get_tool_info()
+
+```python
+def get_tool_info(self, tool_func: Callable) -> Dict[str, Any]:
+```
+
+获取工具信息。
+
+**参数**:
+- `tool_func` (Callable): 工具函数
+
+**返回**:
+- `Dict[str, Any]`: 工具信息字典
+
 ## 子实例 API
 
 ### SubInstanceTool
@@ -634,12 +1305,12 @@ async def tool_function(
 #### 使用示例
 
 ```python
-# Claude 自动生成的调用
-await sub_claude_code_reviewer(
-    task="审查这段代码的安全性",
+# Claude 自动生成的调用示例
+await sub_code_analyzer(
+    task="分析这段代码的复杂度",
     parent_session_id="parent_session_id",
-    context_files=["src/auth.py"],
-    output_format="markdown"
+    context_files=["src/main.py"],
+    output_format="json"
 )
 ```
 
@@ -722,11 +1393,15 @@ class QueryResult:
 
 ```python
 class QueryStream:
-    def __init__(self, session_id: str):
+    def __init__(self, iterator: AsyncIterator[Any], session_id: Optional[str] = None):
+        self._iterator = iterator
         self.session_id = session_id
 
     def __aiter__(self) -> AsyncIterator[Message]:
         """异步迭代器接口"""
+
+    async def __anext__(self) -> Message:
+        """异步迭代器的下一个方法"""
 ```
 
 ### Statistics
@@ -747,52 +1422,28 @@ class Statistics:
 
 ### Message
 
-消息基类。
+消息类型来自 Claude Agent SDK，主要包括：
 
+- `UserMessage`: 用户消息
+- `AssistantMessage`: 助手消息
+- `ToolUseMessage`: 工具使用消息
+- `ToolResultMessage`: 工具结果消息
+- `ResultMessage`: 查询结果消息
+
+消息通常包含内容块（blocks），如：
+- `TextBlock`: 文本内容块
+- `ToolUseBlock`: 工具使用块
+- `ToolResultBlock`: 工具结果块
+
+**使用示例**:
 ```python
-class Message(ABC):
-    def __init__(self, role: str, content: List[Any]):
-        self.role = role
-        self.content = content
-        self.timestamp = datetime.now()
-```
+from claude_agent_sdk import AssistantMessage, TextBlock
 
-#### UserMessage
-
-```python
-class UserMessage(Message):
-    def __init__(self, content: List[TextBlock]):
-        super().__init__("user", content)
-```
-
-#### AssistantMessage
-
-```python
-class AssistantMessage(Message):
-    def __init__(self, content: List[TextBlock], model: str):
-        super().__init__("assistant", content)
-        self.model = model
-```
-
-#### ToolUseMessage
-
-```python
-class ToolUseMessage(Message):
-    def __init__(self, tool_name: str, tool_args: Dict[str, Any]):
-        super().__init__("tool_use", [])
-        self.tool_name = tool_name
-        self.tool_args = tool_args
-```
-
-#### ToolResultMessage
-
-```python
-class ToolResultMessage(Message):
-    def __init__(self, tool_name: str, result: Any, error: Optional[str] = None):
-        super().__init__("tool_result", [])
-        self.tool_name = tool_name
-        self.result = result
-        self.error = error
+# 检查消息类型并处理
+if isinstance(message, AssistantMessage):
+    for block in message.content:
+        if isinstance(block, TextBlock):
+            print(block.text)
 ```
 
 ## 配置选项
@@ -830,21 +1481,15 @@ advanced:
 ### 实时消息配置
 
 ```yaml
+# streaming.yaml
 redis:
-  url: str             # Redis URL
-  db: int             # 数据库编号
-  max_connections: int # 最大连接数
-  password: str       # 密码（可选）
-  ssl: bool          # 是否启用 SSL
+  url: "redis://localhost:6379"  # Redis URL
+  db: 0                         # 数据库编号
+  max_connections: 50           # 最大连接数
 
 async_write:
-  batch_size: int     # 批量大小
-  flush_interval: float # 刷新间隔
-  backup_enabled: bool # 是否启用备份
-
-publishing:
-  enabled: bool       # 是否启用发布
-  channel_prefix: str # 频道前缀
+  batch_size: 10                # 批量大小
+  flush_interval: 1.0          # 刷新间隔（秒）
 ```
 
 ## 最佳实践

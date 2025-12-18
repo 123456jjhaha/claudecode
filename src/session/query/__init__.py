@@ -1,6 +1,5 @@
 """会话查询模块"""
 
-from .tree_builder import SessionTreeBuilder
-from . import session_query
+from .session_query import SessionQuery
 
-__all__ = ["SessionTreeBuilder", "session_query"]
+__all__ = ["SessionQuery"]

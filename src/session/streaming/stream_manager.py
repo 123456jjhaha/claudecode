@@ -11,6 +11,7 @@ from typing import Any, Optional
 from contextvars import ContextVar, Token
 
 from ...logging_config import get_logger
+from ..utils import SessionContext
 
 logger = get_logger(__name__)
 
@@ -49,7 +50,8 @@ class QueryStreamManager:
         record_session: bool = True,
         prompt: Optional[str] = None,
         resume_session_id: Optional[str] = None,
-        parent_session_id: Optional[str] = None
+        parent_session_id: Optional[str] = None,
+        instance_path: Optional[str] = None
     ):
         """
         初始化流管理器
@@ -61,6 +63,7 @@ class QueryStreamManager:
             prompt: 查询提示词（用于创建新会话）
             resume_session_id: 要恢复的会话 ID
             parent_session_id: 父会话 ID（用于子实例调用）
+            instance_path: 实例路径（用于 SessionContext）
         """
         self.stream = stream
         self.session_manager = session_manager
@@ -68,6 +71,7 @@ class QueryStreamManager:
         self.prompt = prompt
         self.resume_session_id = resume_session_id
         self.parent_session_id = parent_session_id
+        self.instance_path = instance_path
         self.session = None  # 实际的 Session 对象
         self._finalized = False  # 防止双重 finalize
         self._context_token: Optional[Token] = None  # 保存上下文令牌
@@ -100,6 +104,14 @@ class QueryStreamManager:
                     parent_session_id=self.parent_session_id  # 传递父会话 ID
                 )
                 logger.info(f"[StreamManager] Created new session: {self.session.session_id}, parent: {self.parent_session_id}")
+
+            # ✅ 将 session_id 写入临时文件，供子实例自动读取
+            if self.session and self.instance_path:
+                SessionContext.set_current_session(
+                    session_id=self.session.session_id,
+                    instance_path=str(self.instance_path)
+                )
+                logger.debug(f"[StreamManager] Set session context: {self.session.session_id}")
 
             self._initialized = True
 
@@ -169,6 +181,11 @@ class QueryStreamManager:
                     f"session_id={self.session.session_id}, error={e}",
                     exc_info=True
                 )
+
+        # ✅ 清理 session 上下文临时文件
+        if self.session:
+            SessionContext.clear_current_session(session_id=self.session.session_id)
+            logger.debug(f"[StreamManager] Cleared session context: {self.session.session_id}")
 
         # 恢复上下文（而不是清空）
         if self._context_token:

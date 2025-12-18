@@ -15,14 +15,17 @@
 - Session: 单个会话对象
 - QueryStreamManager: 查询流管理器，处理消息流和记录
 - MessageBus: Redis 消息总线（实时推送）
+- SessionSubscriber: 会话订阅器（自动订阅父子会话）
 - JSONLWriter: 异步批量 JSONL 写入器
 - SessionTreeBuilder: 会话树构建器
 - MessageSerializer: 消息序列化器
-- EnhancedSession: Session 的增强版本，提供统一的消息访问接口
 
 工具函数：
 - generate_session_id: 生成唯一的会话 ID
 - Statistics: 会话统计信息数据类
+- infer_instance_name: 从 session_id 推断实例名称
+- extract_instance_from_tool_name: 从工具名称提取实例名称
+- get_instance_path: 获取实例目录路径
 """
 
 # 核心类
@@ -32,10 +35,17 @@ from .core import SessionManager, Session
 from .streaming import QueryStreamManager
 
 # 工具函数
-from .utils import generate_session_id, Statistics, MessageSerializer
+from .utils import (
+    generate_session_id,
+    Statistics,
+    MessageSerializer,
+    infer_instance_name,
+    extract_instance_from_tool_name,
+    get_instance_path
+)
 
 # 查询 API
-from .query import session_query
+from .query import SessionQuery
 
 # 实时消息和存储模块
 try:
@@ -46,12 +56,6 @@ except ImportError:
     MessageBus = None
     JSONLWriter = None
     _streaming_available = False
-
-# 会话树构建器
-try:
-    from .query import SessionTreeBuilder
-except ImportError:
-    SessionTreeBuilder = None
 
 
 __all__ = [
@@ -66,14 +70,15 @@ __all__ = [
     # 工具函数
     "generate_session_id",
     "Statistics",
+    "infer_instance_name",
+    "extract_instance_from_tool_name",
+    "get_instance_path",
 
     # 查询模块
+    "SessionQuery",
     "session_query",
 
     # 实时消息和存储
     "MessageBus",
     "JSONLWriter",
-
-    # 会话树构建器
-    "SessionTreeBuilder",
 ]

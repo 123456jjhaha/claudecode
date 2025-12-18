@@ -155,6 +155,17 @@ class SessionManager:
         # 启动会话
         await session.start()
 
+        # ✅ 如果是子实例，发布启动通知到父 session 频道
+        if parent_session_id and self._message_bus:
+            try:
+                await self._notify_parent_of_child_start(
+                    parent_session_id=parent_session_id,
+                    child_session_id=session_id,
+                    instance_name=self.instance_path.name
+                )
+            except Exception as e:
+                logger.warning(f"Failed to notify parent session: {e}")
+
         return session
 
     def _build_session_path_cache(self) -> None:
@@ -282,6 +293,49 @@ class SessionManager:
         except Exception as e:
             logger.error(f"提取Claude session_id失败: {e}")
             return None
+
+    async def _notify_parent_of_child_start(
+        self,
+        parent_session_id: str,
+        child_session_id: str,
+        instance_name: str
+    ) -> None:
+        """
+        通知父 session：子实例已启动
+
+        发布一个特殊消息到父 session 的频道，包含子 session_id，
+        这样父实例的订阅者就能实时知道子实例的 session_id 并订阅其消息流。
+
+        Args:
+            parent_session_id: 父会话 ID
+            child_session_id: 子会话 ID
+            instance_name: 子实例名称
+        """
+        if not self._message_bus:
+            return
+
+        try:
+            # 构建通知消息
+            notification = {
+                "type": "sub_instance_started",
+                "parent_session_id": parent_session_id,
+                "child_session_id": child_session_id,
+                "child_instance_name": instance_name,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            # 发布到父 session 的频道
+            channel = f"session:{parent_session_id}"
+            await self._message_bus.publish(channel, notification)
+
+            logger.info(
+                f"[SessionManager] Notified parent session {parent_session_id} "
+                f"of child session {child_session_id}"
+            )
+
+        except Exception as e:
+            logger.error(f"[SessionManager] Failed to notify parent session: {e}")
+            raise
 
     def list_sessions(
         self,

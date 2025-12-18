@@ -7,6 +7,7 @@
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from .logging_config import get_logger
+from .session.utils import SessionContext
 
 logger = get_logger(__name__)
 
@@ -49,7 +50,6 @@ class SubInstanceTool:
     async def __call__(
         self,
         task: str,
-        parent_session_id: str,
         context_files: Optional[List[str]] = None,
         output_format: str = "text",
         resume_session_id: Optional[str] = None,
@@ -60,9 +60,6 @@ class SubInstanceTool:
 
         Args:
             task: 任务描述
-            parent_session_id: 父会话 ID（必填）
-                **重要**：调用子实例时必须传递当前的 session_id，
-                以便建立父子会话的关联关系
             context_files: 相关文件列表
             output_format: 输出格式（text/json/markdown）
             resume_session_id: 要恢复的子会话 ID
@@ -70,10 +67,21 @@ class SubInstanceTool:
 
         Returns:
             执行结果
+
+        Note:
+            parent_session_id 会自动从父实例的运行时上下文中获取，
+            无需手动传递（通过临时文件实现进程间通信）
         """
         try:
             # 延迟导入避免循环依赖
             from .agent_system import AgentSystem
+
+            # ✅ 自动从临时文件读取 parent_session_id
+            parent_session_id = SessionContext.get_current_session()
+            if parent_session_id:
+                logger.info(f"[SubInstanceTool] Auto-detected parent session: {parent_session_id}")
+            else:
+                logger.warning(f"[SubInstanceTool] No parent session found in context")
 
             # 验证实例路径
             if not self.instance_path.exists():
@@ -83,8 +91,15 @@ class SubInstanceTool:
                 }
 
             # 创建 AgentSystem
-            agent = AgentSystem(str(self.instance_path))
+            # 🔥 传递父实例的 MessageBus 以实现实时消息传递
+            from .session import MessageBus
+            message_bus = MessageBus.from_config()
+            connected = await message_bus.connect()
+            logger.info(f"[SubInstanceTool] 子实例 {self.instance_name} MessageBus 连接状态: {connected}")
+
+            agent = AgentSystem(str(self.instance_path), message_bus=message_bus)
             await agent.initialize()
+            logger.info(f"[SubInstanceTool] 子实例 {self.instance_name} AgentSystem 初始化完成")
 
             try:
                 # 构建提示词
@@ -134,6 +149,7 @@ class SubInstanceTool:
             finally:
                 # 清理资源
                 agent.cleanup()
+                await message_bus.close()
 
         except Exception as e:
             logger.error(f"子实例 {self.instance_name} 执行失败: {e}")

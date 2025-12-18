@@ -167,12 +167,14 @@ class Session:
         }
 
         # 发布到多个频道
-        await self._message_bus.publish(
-            f"messages:session:{self.session_id}", event
-        )
-        await self._message_bus.publish(
-            f"messages:instance:{self.metadata['instance_name']}", event
-        )
+        session_channel = f"session:{self.session_id}"
+        instance_channel = f"instance:{self.metadata['instance_name']}"
+
+        logger.info(f"[Session] {self.metadata['instance_name']} 发布消息到频道: {session_channel}")
+        await self._message_bus.publish(session_channel, event)
+
+        logger.info(f"[Session] {self.metadata['instance_name']} 发布消息到频道: {instance_channel}")
+        await self._message_bus.publish(instance_channel, event)
 
     def _detect_and_record_subsession(self, message: Any) -> None:
         """
