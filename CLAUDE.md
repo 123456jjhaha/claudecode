@@ -608,6 +608,7 @@ query.export_session("session_id", Path("export.json"), format="json")
 ### 核心文档
 
 - [SessionQuery 完整使用指南](docs/session-query-guide.md) ⭐ - 统一会话查询与订阅服务
+- [消息处理与显示指南](docs/message-handling-guide.md) 📨 - 正确处理和显示系统消息的完整指南
 - [会话系统完整指南](docs/session-guide.md) - 会话管理和查询完整指南
 - [SessionQuery 迁移指南](docs/session-migration-guide) 🔄 - 从旧架构平滑迁移
 - [配置指南](docs/configuration.md) - 完整的配置选项说明

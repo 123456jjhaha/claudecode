@@ -98,17 +98,63 @@ async def main():
         # 创建查询实例
         query = SessionQuery("demo_agent", message_bus=message_bus)
 
+        # 定义消息处理函数
+        async def on_parent_message(msg):
+            """处理主Agent消息"""
+            msg_type = msg.get('message_type', 'unknown')
+            data = msg.get('data', {})
+
+            if msg_type == 'UserMessage':
+                content = data.get('content', '')
+                print(f"👤 [用户输入]: {content}")
+
+            elif msg_type == 'AssistantMessage':
+                content_blocks = data.get('content', [])
+                print("🤖 [AI回复]:")
+                for block in content_blocks:
+                    block_type = block.get('type')
+                    if block_type == 'text':
+                        text = block.get('text', '')
+                        if text:
+                            print(f"   {text}")
+                    elif block_type == 'tool_use':
+                        tool_name = block.get('name', 'unknown')
+                        print(f"🔧 [工具调用] {tool_name}")
+
+            elif msg_type == 'ResultMessage':
+                result = data.get('result', '')
+                duration = data.get('duration_ms', 0)
+                print(f"🏁 [会话完成] 耗时: {duration}ms")
+                if result:
+                    print(f"   结果: {result}")
+
+            else:
+                print(f"📨 [消息类型]: {msg_type}")
+
+        async def on_child_message(child_id: str, instance: str, msg):
+            """处理子实例消息"""
+            msg_type = msg.get('message_type', 'unknown')
+            data = msg.get('data', {})
+
+            if msg_type == 'AssistantMessage':
+                content_blocks = data.get('content', [])
+                print(f"🤖 [子实例-{instance} AI回复]:")
+                for block in content_blocks:
+                    if block.get('type') == 'text':
+                        text = block.get('text', '')
+                        if text:
+                            print(f"      {text}")
+            elif msg_type == 'ResultMessage':
+                duration = data.get('duration_ms', 0)
+                print(f"🏁 [子实例-{instance} 完成] 耗时: {duration}ms")
+
         # 开始订阅
         await query.subscribe(
             session_id="parent_session_id",
-            on_parent_message=lambda msg: print(
-                f"[父消息] {msg.get('message_type', 'unknown')}"
-            ),
-            on_child_message=lambda child_id, instance, msg: print(
-                f"[子消息-{instance}] {msg.get('message_type', 'unknown')}"
-            ),
+            on_parent_message=on_parent_message,
+            on_child_message=on_child_message,
             on_child_started=lambda child_id, instance: print(
-                f"🔔 子实例启动: {child_id} ({instance})"
+                f"🔔 子实例启动: {instance} (ID: {child_id})"
             )
         )
 
@@ -265,6 +311,44 @@ asyncio.run(main())
 
 #### `flatten_tree()`
 将树形结构展平为列表。
+
+## 🚨 消息处理常见问题
+
+### ❌ 错误：使用 `type` 字段获取消息类型
+
+```python
+# ❌ 错误示例
+async def on_parent_message(msg):
+    msg_type = msg.get('type', 'unknown')  # 错误！
+    print(f"消息类型: {msg_type}")  # 总是显示 "unknown"
+```
+
+### ✅ 正确：使用 `message_type` 字段
+
+```python
+# ✅ 正确示例
+async def on_parent_message(msg):
+    msg_type = msg.get('message_type', 'unknown')  # 正确！
+    data = msg.get('data', {})  # 消息内容在 data 字段中
+
+    if msg_type == 'UserMessage':
+        content = data.get('content', '')
+        print(f"👤 [用户输入]: {content}")
+    # ... 其他消息类型处理
+```
+
+### 📋 消息格式速查
+
+| 消息类型 | `message_type` | 主要字段 | 用途 |
+|---------|---------------|---------|------|
+| 用户消息 | `UserMessage` | `data.content` | 用户输入内容 |
+| AI回复 | `AssistantMessage` | `data.content[]` | AI回复，包含文本块和工具调用 |
+| 结果消息 | `ResultMessage` | `data.result`, `data.duration_ms` | 会话结果和统计 |
+| 系统消息 | `SystemMessage` | `data.subtype` | 系统事件（如子实例启动） |
+
+### 🔗 相关文档
+
+详细的消息处理指南请参考：**[消息处理与显示指南](message-handling-guide.md)**
 
 ## 🎯 最佳实践
 
