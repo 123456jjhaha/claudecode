@@ -1,0 +1,23 @@
+{
+  "session_id": "20251216T062110_7397_d83b0162",
+  "instance_name": "demo_agent",
+  "start_time": "2025-12-16T06:21:10.797397",
+  "end_time": "2025-12-16T06:21:37.713994",
+  "status": "completed",
+  "prompts": [
+    {
+      "prompt": "使用计算器计算: 123 + 456",
+      "timestamp": "2025-12-16T06:21:10.797397"
+    }
+  ],
+  "results": [
+    {
+      "result": "计算结果：**123 + 456 = 579**\n\n这里展示了 Demo Agent 的计算器工具功能：\n- ✅ 使用了自定义工具 `mcp__custom_tools__calculator__add`\n- ✅ 自动参数类型转换（整数转为浮点数）\n- ✅ 返回结构化结果，包含操作类型、操作数和结果\n\n需要演示其他功能吗？比如：\n- 更多计算器操作（乘法、除法）\n- 文件分析功能\n- 子实例调用\n- 会话记录查询",
+      "timestamp": "2025-12-16T06:21:37.713994",
+      "is_error": false
+    }
+  ],
+  "depth": 0,
+  "parent_session_id": null,
+  "context": {}
+}

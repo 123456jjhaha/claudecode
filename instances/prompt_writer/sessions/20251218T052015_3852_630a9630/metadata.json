@@ -1,0 +1,23 @@
+{
+  "session_id": "20251218T052015_3852_630a9630",
+  "instance_name": "demo_agent",
+  "start_time": "2025-12-18T05:20:15.163852",
+  "end_time": "2025-12-18T05:21:40.097224",
+  "status": "completed",
+  "prompts": [
+    {
+      "prompt": "请调用file_analyzer子实例来分析文件 'test_analysis.txt' 的内容。\n我需要看到：\n1. 文件的基本信息\n2. 内容摘要\n3. 关键信息提取\n\n请确保使用子实例完成这个任务，这样我们就能测试实时消息传递了。",
+      "timestamp": "2025-12-18T05:20:15.163852"
+    }
+  ],
+  "results": [
+    {
+      "result": "完美！file_analyzer 子实例已经成功完成了对 `test_analysis.txt` 文件的深度分析。让我总结一下分析结果：\n\n## 📋 文件分析总结\n\n### 🎯 任务完成情况\n\n✅ **成功调用 file_analyzer 子实例**  \n✅ **完整的文件基本信息分析**  \n✅ **详细的内容摘要**  \n✅ **关键信息提取**  \n✅ **文档结构分析**  \n\n### 📊 核心分析结果\n\n**文件基本信息**：\n- 文件大小：1.24 KB (1,273 字节)\n- 文件类型：纯文本文件 (.txt)\n- 编码格式：UTF-8\n- 语言：中文技术文档\n\n**内容摘要**：\n这是一份关于 **Claude Agent System** 的技术分析报告，详细描述了系统的架构设计、核心特性和技术实现。\n\n**关键信息提取**：\n- **技术栈**：Python 3.8+, FastMCP 框架, Redis, YAML, JSON-RPC over stdio\n- **核心特性**：进程隔离设计、统一会话架构、自动工具发现机制\n- **性能指标**：消息延迟 < 1",
+      "timestamp": "2025-12-18T05:21:40.097224",
+      "is_error": false
+    }
+  ],
+  "depth": 0,
+  "parent_session_id": null,
+  "context": {}
+}

@@ -170,6 +170,51 @@ instances/
         └── {session_id}/     # 每个会话的独立目录
 ```
 
+### 子实例 vs Claude Code Agents（重要概念区分）
+
+本系统使用"子实例"，这与 Claude Code 的"agents/subagents"是**完全不同**的概念：
+
+#### **子实例（Sub-Instances）**
+这是本 Agent System 的核心概念：
+- **定义**：完整的 AgentSystem 实例，拥有独立的配置、工具、会话记录
+- **作用域**：整个独立的智能体系统
+- **配置位置**：`instances/{name}/config.yaml` 中的 `sub_claude_instances`
+- **特点**：
+  - 完整的生命周期管理
+  - 独立的 session 记录
+  - 可以无限层级嵌套
+  - 通过 MCP 工具调用
+- **示例**：`file_analyzer_agent` 是一个完整的子实例
+
+#### **Claude Code Agents（子智能体）**
+这是 Claude Code CLI 的功能：
+- **定义**：专门的 AI 助手角色，用于任务委托
+- **作用域**：单个 Claude Code 会话内
+- **配置位置**：`.claude/agents/{name}.md`（Markdown 文件）
+- **特点**：
+  - 独立的上下文窗口
+  - 自定义系统提示词
+  - 工具权限限制
+  - 可选择不同模型
+  - 自动或手动调用
+- **示例**：`code-reviewer` 是一个代码审查子智能体
+
+#### **关键区别对照表**
+
+| 维度 | 本系统：子实例 | Claude Code: Agents |
+|------|---------------|-------------------|
+| **本质** | 完整的智能体系统 | AI 角色/助手 |
+| **配置格式** | YAML (config.yaml) | Markdown + YAML frontmatter |
+| **作用范围** | 跨会话，持久化 | 单个 Claude 会话内 |
+| **工具系统** | 自己的 tools/ 目录 | 继承或限制父级工具 |
+| **会话管理** | 独立的 session 系统 | 共享父会话上下文 |
+| **调用方式** | 通过 MCP 工具 | Task tool 或自动委托 |
+| **嵌套能力** | 无限递归嵌套 | 不支持嵌套 |
+
+**简单理解**：
+- **子实例** = 一个完整的 "Agent 应用"
+- **Claude Code Agents** = Claude 的 "专业顾问团队成员"
+
 ### Session ID vs Claude ID
 
 **Session ID（会话ID）**：
@@ -182,6 +227,218 @@ instances/
 - 格式：由 Claude SDK 内部管理的唯一标识符
 - 用途：标识与 Claude API 的单次对话会话
 - 特点：仅在单次查询生命周期内有效，SDK 内部管理，查询结束后失效
+
+### .claude 目录配置详解
+
+`.claude` 目录是 Claude Code 的配置中心，本系统在每个实例中都可以使用这些配置来增强功能。
+
+#### 目录结构
+
+```
+instances/{instance_name}/.claude/
+├── agents/                    # Claude Code 子智能体定义
+│   └── {agent_name}.md       # 子智能体配置（Markdown + YAML frontmatter）
+├── commands/                  # 自定义斜杠命令
+│   └── {command_name}.md     # 命令定义
+├── skills/                    # 技能（自动发现的能力）
+│   └── {skill_name}/
+│       ├── SKILL.md          # 技能定义（必需）
+│       ├── FORMS.md          # 支持文档（可选）
+│       └── scripts/          # 辅助脚本（可选）
+├── .mcp.json                 # MCP 服务器配置
+└── settings.json             # Claude Code 设置
+```
+
+#### 1. agents/ - Claude Code 子智能体
+
+**用途**：定义专门的 AI 助手，用于任务委托。
+
+**文件格式**：Markdown 文件 + YAML frontmatter
+
+**示例**：`.claude/agents/prompt_writer_agent.md`
+```markdown
+---
+name: prompt_writer_agent
+description: 专业的提示词书写智能体
+model: sonnet
+tools: Read, Write, Bash
+---
+
+<role>
+You are a professional prompt engineering specialist.
+</role>
+
+<instructions>
+When given requirements, craft high-quality prompts...
+</instructions>
+```
+
+**关键配置项**：
+- `name`: 智能体名称
+- `description`: 描述（帮助 Claude 判断何时调用）
+- `model`: 使用的模型（sonnet/opus/haiku/inherit）
+- `tools`: 允许的工具列表
+- `permissionMode`: 权限模式
+- `skills`: 关联的技能
+
+**调用方式**：
+- 自动：Claude 根据任务自动选择合适的 agent
+- 手动：使用 Task tool 显式调用
+
+#### 2. skills/ - 技能（自动发现的能力）
+
+**用途**：可重用的模块化能力，Claude 会自动在合适时机使用。
+
+**目录结构**：
+```
+skills/{skill_name}/
+├── SKILL.md              # 主定义文件（必需）
+├── REFERENCE.md          # 详细参考（可选）
+├── EXAMPLES.md           # 示例文档（可选）
+└── scripts/              # 辅助脚本（可选）
+    └── helper.py
+```
+
+**SKILL.md 示例**：
+```yaml
+---
+name: pdf-processing
+description: Extract text, fill forms, merge PDFs
+allowed-tools: Read, Bash, Write
+---
+
+# PDF Processing
+
+Instructions for using this skill...
+
+<examples>
+Example usage...
+</examples>
+```
+
+**与 agents 的区别**：
+- **Skills**：自动发现，模型决定使用，适合通用能力
+- **Agents**：显式调用，独立上下文，适合复杂任务
+
+#### 3. commands/ - 自定义斜杠命令
+
+**用途**：常用提示词的快捷方式，通过 `/command-name` 调用。
+
+**文件格式**：单个 Markdown 文件
+
+**示例**：`.claude/commands/commit.md`
+```markdown
+---
+description: Create a git commit
+argument-hint: [message]
+allowed-tools: Bash(git:*)
+---
+
+Based on current changes, create a commit with message: $ARGUMENTS
+```
+
+**特殊语法**：
+- `$ARGUMENTS`: 所有参数
+- `$1`, `$2`: 单个参数
+- `!command`: 执行命令并包含输出
+- `@file-path`: 包含文件内容
+
+**使用**：
+```bash
+/commit "Fix bug in session handling"
+```
+
+#### 4. .mcp.json - MCP 服务器配置
+
+**用途**：连接外部工具、API、数据库等服务。
+
+**示例**：
+```json
+{
+  "mcpServers": {
+    "sequentialthinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    },
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+**传输类型**：
+- `stdio`: 本地进程（通过标准输入输出通信）
+- `http`: HTTP 服务器
+- `sse`: Server-Sent Events
+
+**工具命名**：
+MCP 服务器暴露的工具会自动注册为：`mcp__{server_name}__{tool_name}`
+
+#### 5. settings.json - Claude Code 设置
+
+**用途**：项目级配置，包括权限、环境变量、钩子等。
+
+**示例**：
+```json
+{
+  "permissions": {
+    "allow": ["Bash(git:*)", "Read(./docs/**)"],
+    "deny": ["Read(.env)", "Bash(rm:*)"]
+  },
+  "env": {
+    "NODE_ENV": "development",
+    "API_TIMEOUT_MS": "300000"
+  },
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{"type": "command", "command": "echo 'Done'"}]
+    }]
+  },
+  "alwaysThinkingEnabled": true,
+  "model": "claude-sonnet-4-5"
+}
+```
+
+**关键配置**：
+- `permissions`: 工具访问控制
+- `env`: 环境变量（对所有会话生效）
+- `hooks`: 事件驱动的自动化
+- `enabledPlugins`: 插件管理
+- `model`: 默认模型覆盖
+- `attribution`: Git 提交/PR 自定义
+
+#### 配置优先级
+
+多个位置的配置会按优先级合并：
+1. **Local**（最高）: `.claude/settings.local.json`（不提交到 git）
+2. **Project**: `.claude/settings.json`（团队共享）
+3. **User**: `~/.claude/settings.json`（用户全局）
+
+#### 实例特定配置示例
+
+本系统的 `prompt_writer` 实例使用了以下配置：
+
+```
+instances/prompt_writer/.claude/
+├── agents/
+│   ├── prompt_writer_agent.md      # 提示词书写智能体
+│   └── prompt_optimizer_agent.md   # 提示词优化智能体
+├── .mcp.json                        # Sequential Thinking MCP 服务器
+├── agent.md                         # 主智能体提示词
+└── settings.json                    # 实例设置
+```
+
+**关键点**：
+- `.claude/` 配置是 Claude Code 的功能，不是本系统特有的
+- 每个实例可以有自己的 `.claude/` 配置
+- agents、skills、commands 都是 Claude Code 在运行时使用的
+- 本系统的"子实例"是通过 `config.yaml` 配置的，与 `.claude/agents/` 无关
 
 ---
 
