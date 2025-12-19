@@ -66,6 +66,7 @@ class SessionQuery:
         self.message_bus = message_bus
 
         # 订阅相关状态
+        self.session_id: Optional[str] = None  # 当前订阅的 session_id
         self.child_sessions: Dict[str, str] = {}
         self.subscription_tasks: List[asyncio.Task] = []
         self._running = False
@@ -346,7 +347,8 @@ class SessionQuery:
         if self._stopped:
             return
 
-        logger.info(f"[SessionQuery] 停止订阅 session: {self.session_id}")
+        session_info = self.session_id or "未订阅"
+        logger.info(f"[SessionQuery] 停止订阅 session: {session_info}")
 
         self._running = False
         self._stopped = True
