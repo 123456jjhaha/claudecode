@@ -24,79 +24,199 @@ from src.session.utils import SessionContext
 
 
 class MessageFormatter:
-    """消息格式化工具类"""
+    """消息格式化工具类 - 简化输出，更友好的用户体验"""
 
     @staticmethod
     def format_content_block(block: Dict, prefix: str = "   ") -> str:
-        """格式化内容块"""
+        """格式化内容块 - 简化版本"""
         block_type = block.get('type')
 
         if block_type == 'text':
             text = block.get('text', '')
             if text:
-                return MessageFormatter._format_long_text(text, prefix)
+                return MessageFormatter._format_text_content(text, prefix)
 
         elif block_type == 'tool_use':
+            # 简化工具调用显示
             tool_name = block.get('name', 'unknown')
-            tool_input = block.get('input', {})
-            lines = [f"\n🔧 [工具调用] {tool_name}"]
-            if tool_input:
-                args_str = MessageFormatter._format_tool_args(tool_input)
-                lines.append(f"{prefix}📋 参数: {args_str}")
-            return '\n'.join(lines)
+            return f"\n🔧 正在使用: {MessageFormatter._format_tool_name(tool_name)}"
 
         elif block_type == 'tool_result':
+            # 简化工具结果显示
             content = block.get('content', '')
             is_error = block.get('is_error', False)
-            status_icon = "❌" if is_error else "✅"
-            lines = [f"\n{status_icon} [工具结果] {'执行失败' if is_error else '执行完成'}"]
-            if content:
-                preview = MessageFormatter._truncate_content(content, 200)
-                lines.append(f"{prefix}📄 结果: {preview}")
-            return '\n'.join(lines)
+
+            if is_error:
+                return f"\n❌ 操作失败: {MessageFormatter._extract_error_message(content)}"
+            else:
+                # 成功时只显示关键信息
+                preview = MessageFormatter._extract_success_preview(content)
+                if preview:
+                    return f"\n✅ {preview}"
+                return "\n✅ 操作完成"
 
         return ""
 
     @staticmethod
-    def _format_long_text(text: str, prefix: str) -> str:
-        """格式化长文本"""
-        if len(text) <= 300:
+    def _format_text_content(text: str, prefix: str) -> str:
+        """格式化文本内容 - 自动换行，保持可读性"""
+        if not text.strip():
+            return ""
+
+        # 清理文本
+        text = text.strip()
+
+        # 如果文本较短，直接返回
+        if len(text) <= 200:
             return f"{prefix}{text}"
 
+        # 长文本分段显示，保持良好格式
         lines = []
-        sentences = text.split('\n')
-        current_line = ""
+        paragraphs = text.split('\n\n')
 
-        for sentence in sentences:
-            if len(current_line + sentence) > 300:
-                if current_line:
-                    lines.append(f"{prefix}{current_line.strip()}")
-                current_line = sentence + "\n"
+        for paragraph in paragraphs:
+            paragraph = paragraph.strip()
+            if not paragraph:
+                continue
+
+            # 如果段落太长，按句子分割
+            if len(paragraph) > 300:
+                sentences = paragraph.split('。')
+                current_line = f"{prefix}"
+
+                for sentence in sentences:
+                    sentence = sentence.strip()
+                    if not sentence:
+                        continue
+
+                    if len(current_line) + len(sentence) > 280:
+                        if current_line != prefix:
+                            lines.append(current_line)
+                        current_line = f"{prefix}{sentence}。"
+                    else:
+                        current_line += f"{sentence}。"
+
+                if current_line != prefix:
+                    lines.append(current_line)
             else:
-                current_line += sentence + "\n"
-
-        if current_line:
-            lines.append(f"{prefix}{current_line.strip()}")
+                lines.append(f"{prefix}{paragraph}")
 
         return '\n'.join(lines)
 
     @staticmethod
+    def _format_tool_name(tool_name: str) -> str:
+        """格式化工具名称 - 显示更友好的名称"""
+        # 移除常见前缀
+        if tool_name.startswith('mcp__'):
+            parts = tool_name.split('__')
+            if len(parts) >= 3:
+                return f"{parts[1].replace('_', ' ').title()} - {parts[2].replace('_', ' ').title()}"
+
+        # 替换下划线为空格，首字母大写
+        return tool_name.replace('_', ' ').title()
+
+    @staticmethod
+    def _extract_error_message(content: str) -> str:
+        """提取错误信息的关键部分"""
+        if isinstance(content, dict):
+            return content.get('message', str(content))
+
+        if isinstance(content, str):
+            # 尝试提取有用信息
+            lines = content.split('\n')
+            for line in lines:
+                if 'error' in line.lower() or 'failed' in line.lower():
+                    return line.strip()
+            return content[:100] + "..." if len(content) > 100 else content
+
+        return str(content)[:100]
+
+    @staticmethod
+    def _extract_success_preview(content: str) -> str:
+        """提取成功结果的预览"""
+        if not content:
+            return ""
+
+        if isinstance(content, dict):
+            # 尝试提取最有用的信息
+            if 'result' in content:
+                return MessageFormatter._extract_success_preview(content['result'])
+            if 'data' in content:
+                return MessageFormatter._extract_success_preview(content['data'])
+            if 'message' in content:
+                return content['message']
+            return "操作成功完成"
+
+        if isinstance(content, str):
+            # 清理和截断
+            content = content.strip()
+            if not content:
+                return ""
+
+            # 移除多余的空白和换行
+            content = ' '.join(content.split())
+
+            # 智能截断
+            if len(content) <= 80:
+                return content
+            elif len(content) <= 200:
+                return content + "..."
+            else:
+                # 尝试在句子边界截断
+                sentences = content.split('。')
+                if sentences:
+                    first_sentence = sentences[0].strip()
+                    if len(first_sentence) > 20:
+                        return first_sentence + "..."
+                return content[:80] + "..."
+
+        return ""
+
+    @staticmethod
     def _format_tool_args(tool_input: Dict) -> str:
-        """格式化工具参数"""
-        if isinstance(tool_input, dict):
-            return ", ".join([f"{k}={v}" for k, v in tool_input.items() if len(str(v)) < 50])
-        return str(tool_input)
+        """格式化工具参数 - 简化显示"""
+        if not isinstance(tool_input, dict):
+            return str(tool_input)
+
+        # 只显示重要参数，隐藏敏感信息
+        important_keys = ['query', 'text', 'content', 'path', 'file_path', 'url']
+        result_parts = []
+
+        for key, value in tool_input.items():
+            if any(important in key.lower() for important in important_keys):
+                value_str = str(value)
+                if len(value_str) > 50:
+                    value_str = value_str[:50] + "..."
+                result_parts.append(f"{key}: {value_str}")
+
+        if result_parts:
+            return ", ".join(result_parts)
+        elif len(tool_input) <= 3:
+            # 如果参数不多，显示所有
+            return ", ".join([f"{k}: {str(v)[:30]}" for k, v in list(tool_input.items())[:2]])
+        else:
+            return f"{len(tool_input)} 个参数"
 
     @staticmethod
     def _truncate_content(content: str, max_length: int) -> str:
-        """截断内容"""
-        if isinstance(content, str) and len(content) > max_length:
-            return content[:max_length] + "..."
-        return str(content)
+        """截断内容 - 智能截断"""
+        if not isinstance(content, str):
+            return str(content)[:max_length]
+
+        if len(content) <= max_length:
+            return content
+
+        # 尝试在单词边界截断
+        truncated = content[:max_length]
+        last_space = truncated.rfind(' ')
+        if last_space > max_length * 0.8:  # 如果最后一个空字位置不太靠前
+            truncated = truncated[:last_space]
+
+        return truncated + "..."
 
 
 class MessageHandler:
-    """消息处理器"""
+    """消息处理器 - 简化输出"""
 
     def create_parent_handler(self) -> Callable:
         """创建父实例消息处理器"""
@@ -105,10 +225,10 @@ class MessageHandler:
 
             if msg_type == 'UserMessage':
                 content = msg.get('data', {}).get('content', '')
-                print(f"\n👤 [用户输入]: {content}")
+                print(f"\n👤 你: {content}")
 
             elif msg_type == 'AssistantMessage':
-                print(f"\n🤖 [AI回复]:")
+                print(f"\n🤖 AI回复:")
                 content_blocks = msg.get('data', {}).get('content', [])
                 for block in content_blocks:
                     formatted = MessageFormatter.format_content_block(block)
@@ -121,72 +241,70 @@ class MessageHandler:
             elif msg_type == 'SystemMessage':
                 self._handle_system_message(msg)
 
-            else:
-                print(f"\n📨 [主Agent] 消息类型: {msg_type}")
-
         return on_parent_message
 
     def create_child_handler(self) -> Callable:
         """创建子实例消息处理器"""
         async def on_child_message(child_id: str, instance: str, msg):
             msg_type = msg.get('message_type', 'unknown')
-            prefix = "      "  # 子实例消息缩进
+            instance_name = MessageFormatter._format_tool_name(instance)
 
             if msg_type == 'UserMessage':
                 content = msg.get('data', {}).get('content', '')
-                print(f"\n👤 [子实例-{instance} 用户输入]: {content}")
+                print(f"\n   👤 [{instance_name}] 用户: {content}")
 
             elif msg_type == 'AssistantMessage':
-                print(f"\n🤖 [子实例-{instance} AI回复]:")
+                print(f"\n   🤖 [{instance_name}] 回复:")
                 content_blocks = msg.get('data', {}).get('content', [])
                 for block in content_blocks:
-                    formatted = MessageFormatter.format_content_block(block, prefix)
+                    formatted = MessageFormatter.format_content_block(block, "   ")
                     if formatted:
                         print(formatted)
 
             elif msg_type == 'ResultMessage':
-                self._handle_result_message(msg, f"[子实例-{instance}] ", prefix)
+                self._handle_result_message(msg, f"[{instance_name}] ", "   ")
 
             elif msg_type == 'SystemMessage':
-                self._handle_system_message(msg, f"[子实例-{instance}] ")
-
-            else:
-                print(f"\n📨 [子实例-{instance}] 消息类型: {msg_type}")
+                self._handle_system_message(msg, f"[{instance_name}] ")
 
         return on_child_message
 
     def _handle_result_message(self, msg: Dict, instance_prefix: str, prefix: str = ""):
-        """处理结果消息"""
+        """处理结果消息 - 简化显示"""
         data = msg.get('data', {})
         result = data.get('result', '')
         is_error = data.get('is_error', False)
         duration_ms = data.get('duration_ms', 0)
 
-        print(f"\n🏁 {instance_prefix}会话结束 {'执行失败' if is_error else '执行完成'}")
-        print(f"{prefix}⏱️ 耗时: {duration_ms}ms")
-
-        if result and not is_error:
-            preview = MessageFormatter._truncate_content(result, 200)
-            print(f"{prefix}📄 最终结果: {preview}")
-        elif is_error:
-            print(f"{prefix}❌ 错误: {result}")
+        if is_error:
+            print(f"\n{prefix}❌ {instance_prefix} 执行失败")
+            error_msg = MessageFormatter._extract_error_message(result)
+            if error_msg:
+                print(f"{prefix}   {error_msg}")
+        else:
+            # 成功时简化显示
+            if duration_ms > 1000:  # 超过1秒才显示时间
+                print(f"\n{prefix}✅ {instance_prefix} 完成 (用时 {duration_ms//1000}.{(duration_ms%1000)//100}秒)")
+            else:
+                print(f"\n{prefix}✅ {instance_prefix} 完成")
 
     def _handle_system_message(self, msg: Dict, instance_prefix: str = ""):
-        """处理系统消息"""
+        """处理系统消息 - 只显示重要信息"""
         data = msg.get('data', {})
         subtype = data.get('subtype', 'unknown')
 
+        # 只显示重要的系统消息
         if subtype == 'sub_instance_started':
             child_instance = data.get('instance_name', 'unknown')
-            print(f"\n🔔 {instance_prefix}系统] 子实例启动: {child_instance}")
-        else:
-            print(f"\n📋 {instance_prefix}系统] {subtype}")
+            instance_name = MessageFormatter._format_tool_name(child_instance)
+            print(f"\n🔔 启动助手: {instance_name}")
+        # 其他系统消息不显示，避免干扰用户
 
     def create_child_started_handler(self) -> Callable:
         """创建子实例启动处理器"""
         async def on_child_started(child_id: str, instance: str):
-            print(f"\n🔔 [系统] 子实例启动: {instance}")
-            print(f"   🆔 子会话ID: {child_id}")
+            instance_name = MessageFormatter._format_tool_name(instance)
+            print(f"   🆔 会话ID: {child_id}")
 
         return on_child_started
 
@@ -198,32 +316,30 @@ class SessionManager:
         self.query = query
 
     async def get_session_list(self, limit: int = 10) -> Optional[list]:
-        """获取会话列表"""
+        """获取会话列表 - 简化显示"""
         try:
             sessions = self.query.list_sessions(limit=limit)
             if not sessions:
                 print("📭 暂无会话记录")
                 return None
 
-            print(f"\n📋 最近的会话列表:")
-            print("-" * 80)
-            print(f"{'会话ID':<25} {'状态':<10} {'开始时间':<20} {'消息数':<8} {'最后消息'}")
-            print("-" * 80)
+            print(f"\n📋 最近的会话:")
+            print("=" * 60)
 
-            for session in sessions:
-                session_info = await self._format_session_info(session)
+            for idx, session in enumerate(sessions, 1):
+                session_info = await self._format_session_info(session, idx)
                 print(session_info)
+                print("-" * 60)
 
-            print("-" * 80)
-            print("💡 提示: 复制完整的会话ID来继续特定对话")
+            print(f"💡 提示: 使用完整的会话ID继续对话")
             return sessions
 
         except Exception as e:
             print(f"❌ 获取会话列表失败: {e}")
             return None
 
-    async def _format_session_info(self, session: Dict) -> str:
-        """格式化会话信息"""
+    async def _format_session_info(self, session: Dict, idx: int) -> str:
+        """格式化会话信息 - 更友好的显示"""
         session_id = session.get('session_id', 'unknown')
         status = session.get('status', 'unknown')
         start_time = session.get('start_time', 'unknown')
@@ -234,11 +350,30 @@ class SessionManager:
         # 获取最后消息预览
         last_preview = await self._get_last_message_preview(session_id)
 
-        # 截断显示
-        short_id = session_id[:22] + "..." if len(session_id) > 25 else session_id
-        start_time_short = start_time[:16] if len(start_time) > 16 else start_time
+        # 格式化状态显示
+        status_icon = "🟢" if status == "completed" else "🟡" if status == "running" else "⚪"
 
-        return f"{short_id:<25} {status:<10} {start_time_short:<20} {message_count:<8} {last_preview}"
+        # 格式化时间显示
+        try:
+            # 尝试解析时间并格式化为更友好的格式
+            if len(start_time) > 10:
+                date_part = start_time[:10]
+                time_part = start_time[11:16] if len(start_time) > 16 else ""
+                time_str = f"{date_part} {time_part}".strip()
+            else:
+                time_str = start_time
+        except:
+            time_str = start_time
+
+        # 构建会话信息
+        lines = []
+        lines.append(f"{idx}. {status_icon} 会话ID: {session_id}")
+        lines.append(f"   时间: {time_str} | 消息数: {message_count}")
+
+        if last_preview and last_preview != "N/A":
+            lines.append(f"   最后消息: {last_preview}")
+
+        return '\n'.join(lines)
 
     async def _get_message_count(self, session_id: str) -> int:
         """获取消息数量"""
@@ -376,12 +511,8 @@ class InteractiveChat:
 
     async def start_realtime_subscription(self, session_id: str):
         """启动实时消息订阅"""
-        print(f"📡 开始订阅实时消息: {session_id}")
-
         try:
-            # 确保query对象已正确初始化
             if not self.query:
-                print(f"❌ SessionQuery对象未初始化")
                 return
 
             await self.query.subscribe(
@@ -390,170 +521,156 @@ class InteractiveChat:
                 on_child_message=self.message_handler.create_child_handler(),
                 on_child_started=self.message_handler.create_child_started_handler()
             )
-            print(f"✅ 订阅方法调用成功，会话ID: {session_id}")
-        except Exception as e:
-            print(f"❌ 订阅失败: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
+        except Exception:
+            # 静默处理订阅错误，不干扰用户体验
+            pass
 
     async def process_query(self, query_text: str, resume_session_id: Optional[str] = None):
-        """处理查询请求"""
-        print("\n" + "="*60)
-        print("🤔 AI正在思考...")
-        print("="*60)
+        """处理查询请求 - 简化输出"""
+        # 简化进度显示
+        if resume_session_id:
+            print(f"\n🔄 继续对话...")
+        else:
+            print(f"\n💭 AI正在思考...")
 
         # 清理之前的订阅
         if self.query:
             await self.query.stop()
             await asyncio.sleep(0.1)
 
-        # 🎯 统一处理：先启动查询任务，再等待session_id并建立订阅
+        # 启动查询任务
         query_task = asyncio.create_task(
             self.agent.query_text(query_text, resume_session_id=resume_session_id)
         )
 
-        # 🎯 完全统一：无论新对话还是继续对话，都使用完全相同的逻辑
-        # 统一等待SessionContext被QueryStreamManager设置
-        await asyncio.sleep(0.1)  # 给QueryStreamManager.initialize()一点启动时间
+        # 等待会话创建
+        await asyncio.sleep(0.1)
+        session_id = None
 
-        for attempt in range(20):
+        for attempt in range(30):  # 增加尝试次数
             await asyncio.sleep(0.1)
             current_session = SessionContext.get_current_session()
 
-            # 调试信息
-            print(f"🔍 尝试 {attempt + 1}/20: SessionContext={current_session}, 传入的resume_session_id={resume_session_id}")
-
             if current_session:
                 session_id = current_session
-                if resume_session_id:
-                    print(f"🔄 继续会话: {session_id}")
-                else:
-                    print(f"🆕 新会话创建: {session_id}")
                 break
 
-        # 建立订阅 - 统一的订阅逻辑
+        # 建立订阅
         if session_id:
             self.current_session_id = session_id
-            print(f"🔧 准备建立订阅，会话ID: {session_id}")
-
-            # 创建新的SessionQuery实例
             self.query = SessionQuery(self.instance_name, message_bus=self.message_bus)
-            print(f"🔧 SessionQuery实例已创建")
-
-            # 等待一小段时间确保session已完全初始化
             await asyncio.sleep(0.2)
-
             await self.start_realtime_subscription(session_id)
-            print(f"📡 已订阅实时消息: {session_id}")
-        else:
-            print("❌ 未能获取会话ID，无法订阅实时消息")
-            print(f"🔍 调试信息: resume_session_id={resume_session_id}")
-            # 再次检查SessionContext
-            final_check = SessionContext.get_current_session()
-            print(f"🔍 最终检查SessionContext: {final_check}")
 
         try:
             result = await query_task
-            print("\n" + "="*60)
-            print(f"✅ 查询完成！")
-            print(f"📋 会话ID: {result.session_id}")
-            print(f"💡 回复长度: {len(result.result) if result.result else 0} 字符")
-            if result.result:
-                print(f"📝 回复内容:\n{result.result}")
-            print("="*60)
+
+            # 简化结果显示
+            if result:
+                self.current_session_id = result.session_id
+                # 不在这里显示结果，因为实时消息已经显示了
+                if not session_id:  # 如果没有实时订阅，才显示最终结果
+                    print(f"\n📝 回复:\n{result.result}")
+            else:
+                print("\n❌ 查询失败")
 
             return result
 
         except Exception as e:
-            print(f"❌ 查询失败: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"\n❌ 出错了: {str(e)[:100]}")
             return None
 
     async def ask_for_action(self) -> str:
         """询问用户下一步操作"""
-        print("\n" + "-"*40)
-        print("请选择下一步操作：")
-        print("1. 继续当前对话")
-        print("2. 开始新对话")
-        print("3. 查看会话信息")
-        print("4. 继续指定会话")
-        print("5. 重新运行最后一个查询")
-        print("6. 退出程序")
-        print("-"*40)
-        print("💡 提示: 直接按回车继续当前对话")
+        print("\n" + "─" * 40)
+        print("接下来想要做什么？")
+        print("1️⃣  继续当前对话")
+        print("2️⃣  开始新对话")
+        print("3️⃣  查看会话信息")
+        print("4️⃣  继续之前的会话")
+        print("5️⃣  重新运行上一次查询")
+        print("6️⃣  退出")
+        print("─" * 40)
+        print("💡 直接按回车继续当前对话")
 
         while True:
-            choice = input("请输入选择 (1-6，默认为1): ").strip()
+            choice = input("请选择 (1-6，默认1): ").strip()
             if not choice:
                 return '1'
             if choice in ['1', '2', '3', '4', '5', '6']:
                 return choice
-            print("⚠️ 无效选择，请输入 1-6 或直接回车")
+            print("⚠️ 请输入 1-6 之间的数字")
 
     async def show_session_info(self):
         """显示当前会话信息"""
         if not self.current_session_id:
-            print("📭 当前没有活跃会话")
+            print("📭 当前没有会话")
             return
 
-        print(f"\n📊 当前会话信息:")
-        print(f"会话ID: {self.current_session_id}")
+        print(f"\n📊 当前会话:")
+        print(f"ID: {self.current_session_id}")
 
         try:
             details = self.query.get_session_details(self.current_session_id, include_messages=True)
             if details:
-                print(f"状态: {details.get('status', 'unknown')}")
-                print(f"开始时间: {details.get('start_time', 'unknown')}")
-                print(f"消息数量: {len(details.get('messages', []))}")
+                status = details.get('status', 'unknown')
+                status_icon = "🟢" if status == "completed" else "🟡" if status == "running" else "⚪"
+                print(f"状态: {status_icon} {status}")
+
+                start_time = details.get('start_time', 'unknown')
+                if len(start_time) > 10:
+                    time_str = f"{start_time[:10]} {start_time[11:16]}"
+                    print(f"时间: {time_str}")
 
                 messages = details.get('messages', [])
-                if messages:
-                    print("\n📜 最近的消息:")
-                    for msg in messages[-3:]:
-                        role = msg.get('role', 'unknown')
-                        content = msg.get('content', '')
-                        if len(content) > 50:
-                            content = content[:50] + "..."
-                        print(f"  {role}: {content}")
+                print(f"消息: {len(messages)} 条")
+
+                # 显示最后一条消息
+                last_msg = self._get_last_user_assistant_message(messages)
+                if last_msg:
+                    role = "👤 你" if last_msg['role'] == 'user' else "🤖 AI"
+                    content = last_msg.get('content', '')
+                    if len(content) > 60:
+                        content = content[:60] + "..."
+                    print(f"最后: {role}: {content}")
+
         except Exception as e:
-            print(f"❌ 获取会话信息失败: {e}")
+            print(f"⚠️ 无法获取详细信息")
 
     def show_help(self):
         """显示帮助信息"""
-        print("\n" + "="*50)
-        print("📚 可用命令:")
-        print("  help    - 显示此帮助信息")
-        print("  info    - 查看当前会话信息")
-        print("  read    - 读取文件内容并作为对话输入")
-        print("  clear   - 清空屏幕")
-        print("  exit    - 退出程序")
-        print("\n🔄 继续对话功能:")
-        print("  选项 1  - 继续当前对话（默认）")
-        print("  选项 4  - 通过会话ID继续指定会话")
-        print("="*50)
+        print("\n" + "💡 快捷命令")
+        print("─" * 30)
+        print("help     - 显示帮助")
+        print("info     - 查看当前会话")
+        print("read 文件 - 读取文件内容")
+        print("clear    - 清空屏幕")
+        print("exit     - 退出程序")
+        print("\n💭 对话")
+        print("─" * 30)
+        print("直接输入内容即可开始对话")
+        print("按回车默认继续当前对话")
 
     async def show_welcome_menu(self) -> Optional[str]:
         """显示欢迎菜单"""
-        print("\n" + "="*50)
-        print("🎉 Claude Agent 交互式对话程序")
-        print("="*50)
-        print("请选择您想要进行的操作：")
-        print("1. 开始新对话")
-        print("2. 继续指定会话")
-        print("3. 查看最近会话列表")
-        print("4. 查看帮助信息")
-        print("5. 退出程序")
-        print("-"*50)
+        print("\n" + "🎨" * 20)
+        print("  欢迎使用 Claude Agent")
+        print("🎨" * 20)
+
+        print("\n今天想做点什么？")
+        print("1️⃣  开始新对话")
+        print("2️⃣  继续之前的会话")
+        print("3️⃣  查看会话记录")
+        print("4️⃣  帮助")
+        print("5️⃣  退出")
+        print("─" * 30)
 
         while True:
-            choice = input("请输入选择 (1-5): ").strip()
+            choice = input("请选择 (1-5): ").strip()
 
             if choice == '1':
-                print("\n" + "="*60)
-                print("📊 新对话已开始，请输入您的问题：")
-                print("="*60)
+                print("\n✨ 新对话已开始")
+                print("💬 请输入您的问题：")
                 return None
             elif choice == '2':
                 return await self.resume_session_by_id()
@@ -562,12 +679,13 @@ class InteractiveChat:
                 return await self.show_welcome_menu()
             elif choice == '4':
                 self.show_help()
+                input("\n按回车继续...")
                 return await self.show_welcome_menu()
             elif choice == '5':
-                print("👋 再见！")
+                print("\n👋 再见！")
                 sys.exit(0)
             else:
-                print("⚠️ 无效选择，请输入 1-5")
+                print("⚠️ 请输入 1-5")
 
     async def resume_session_by_id(self) -> Optional[str]:
         """通过会话ID继续对话"""
@@ -749,10 +867,9 @@ class InteractiveChat:
 
             while True:
                 if self.current_session_id:
-                    print(f"\n🏷️  当前会话: {self.current_session_id}")
+                    print(f"\n📌 当前会话: {self.current_session_id[:20]}...")
 
-                print("\n💭 请输入您的问题:")
-                print("💡 提示: 输入 'help' 查看可用命令")
+                print("\n💬 请输入内容（输入 help 查看命令）:")
                 user_input = input("> ").strip()
 
                 if not user_input:
@@ -788,7 +905,7 @@ class InteractiveChat:
 
 async def main():
     """主函数"""
-    instance_name = sys.argv[1] if len(sys.argv) > 1 else "prompt_writer"
+    instance_name = sys.argv[1] if len(sys.argv) > 1 else "search_master_agent"
     chat = InteractiveChat(instance_name)
     await chat.run()
 

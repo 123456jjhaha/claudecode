@@ -32,7 +32,7 @@ cwd: "."
 tools:
   # 明确禁止使用的内置工具（主智能体只使用Task工具调用子智能体）
   disallowed:
-    # - "WebFetch"      # 禁止网页获取（由子智能体处理）
+    - "WebFetch"      # 禁止网页获取（由子智能体处理）
     - "WebSearch"     # 禁止网页搜索（由子智能体处理）
     - "KillShell"     # 禁止杀死 shell 进程
     - "Skill"         # 禁止技能调用
