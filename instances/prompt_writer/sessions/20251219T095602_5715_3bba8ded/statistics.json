@@ -1,0 +1,37 @@
+{
+  "session_id": "20251219T095602_5715_3bba8ded",
+  "total_duration_ms": 913946,
+  "api_duration_ms": 1250829,
+  "num_turns": 43,
+  "num_messages": 291,
+  "num_tool_calls": 129,
+  "tools_used": {
+    "TodoWrite": 12,
+    "Write": 23,
+    "Bash": 18,
+    "Read": 34,
+    "Task": 15,
+    "Glob": 11,
+    "Edit": 13,
+    "AgentOutputTool": 3
+  },
+  "subsessions": [],
+  "token_usage": {
+    "input_tokens": 43263,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 1209600,
+    "output_tokens": 34951,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    }
+  },
+  "cost_usd": 2.834981300000001,
+  "final_status": "completed",
+  "error_count": 0
+}

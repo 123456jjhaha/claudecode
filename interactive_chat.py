@@ -26,7 +26,7 @@ from src.session.utils import SessionContext
 class InteractiveChat:
     """交互式对话管理器"""
 
-    def __init__(self, instance_name: str = "demo_agent"):
+    def __init__(self, instance_name: str = "prompt_writer"):
         self.instance_name = instance_name
         self.message_bus = None
         self.agent = None
@@ -616,7 +616,7 @@ class InteractiveChat:
 async def main():
     """主函数"""
     # 可以通过命令行参数指定实例名称
-    instance_name = sys.argv[1] if len(sys.argv) > 1 else "demo_agent"
+    instance_name = sys.argv[1] if len(sys.argv) > 1 else "prompt_writer"
 
     chat = InteractiveChat(instance_name)
     await chat.run()
