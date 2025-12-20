@@ -15,14 +15,13 @@ from ...logging_config import get_logger
 from ...error_handling import AgentSystemError
 from ..utils.session_utils import generate_session_id
 from .session import Session
+from ..storage.jsonl_writer import JSONLWriter
 
 # 新增导入
 try:
     from ..streaming.message_bus import MessageBus
-    from ..storage.jsonl_writer import JSONLWriter
 except ImportError:
     MessageBus = None
-    JSONLWriter = None
 
 logger = get_logger(__name__)
 
@@ -76,6 +75,9 @@ class SessionManager:
 
         # 会话路径缓存（用于快速查找）
         self._session_path_cache: dict[str, Path] = {}
+
+        # JSONLWriter（用于消息记录）
+        self._jsonl_writer = None
 
     async def create_session(
         self,
@@ -224,12 +226,23 @@ class SessionManager:
         with open(metadata_file, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
 
-        # 创建 Session 对象
+        # 创建 JSONLWriter（用于追加消息）
+        jsonl_writer = None
+        if self._jsonl_writer is not None:
+            jsonl_writer = JSONLWriter(
+                session_dir=session_dir,
+                batch_size=self._jsonl_writer.batch_size,
+                flush_interval=self._jsonl_writer.flush_interval
+            )
+
+        # 创建 Session 对象（传递所有必要的依赖项）
         session = Session(
             session_id=session_id,
             session_dir=session_dir,
             metadata=metadata,
-            config=self.config
+            config=self.config,
+            message_bus=self._message_bus,  # 传递 MessageBus（用于消息发布）
+            jsonl_writer=jsonl_writer      # 传递 JSONLWriter（用于消息记录）
         )
 
         # 设置状态为可追加（重要：允许 resume 时追加消息）
