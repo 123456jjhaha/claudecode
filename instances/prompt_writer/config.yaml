@@ -32,7 +32,6 @@ tools:
     - "WebFetch"      # 禁止网页获取
     - "WebSearch"     # 禁止网页搜索
     - "KillShell"     # 禁止杀死 shell 进程
-    - "Skill"         # 禁止技能调用
     - "SlashCommand"  # 禁止斜杠命令
 
   # 允许的 MCP 工具
