@@ -95,7 +95,8 @@ class QueryStreamManager:
             if self.resume_session_id:
                 # Resume 模式：恢复已有会话
                 self.session = self.session_manager.get_session(self.resume_session_id)
-                logger.info(f"[StreamManager] Resume session: {self.resume_session_id}")
+                await self.session.start()  # 启动会话（确保JSONLWriter后台任务运行）
+                logger.info(f"[StreamManager] Resume and started session: {self.resume_session_id}")
             else:
                 # 创建新会话
                 self.session = await self.session_manager.create_session(

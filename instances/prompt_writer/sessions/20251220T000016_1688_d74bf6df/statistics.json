@@ -1,0 +1,28 @@
+{
+  "session_id": "20251220T000016_1688_d74bf6df",
+  "total_duration_ms": 5717,
+  "api_duration_ms": 8129,
+  "num_turns": 1,
+  "num_messages": 3,
+  "num_tool_calls": 0,
+  "tools_used": {},
+  "subsessions": [],
+  "token_usage": {
+    "input_tokens": 269,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 20096,
+    "output_tokens": 437,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    }
+  },
+  "cost_usd": 0.0241068,
+  "final_status": "completed",
+  "error_count": 0
+}

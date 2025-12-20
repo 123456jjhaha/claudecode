@@ -228,11 +228,15 @@ class SessionManager:
 
         # 创建 JSONLWriter（用于追加消息）
         jsonl_writer = None
-        if self._jsonl_writer is not None:
+        if self._message_bus:
+            # 从环境变量或配置读取参数（与create_session保持一致）
+            batch_size = int(os.getenv("ASYNC_WRITE_BATCH_SIZE", "10"))
+            flush_interval = float(os.getenv("ASYNC_WRITE_FLUSH_INTERVAL", "1.0"))
+
             jsonl_writer = JSONLWriter(
                 session_dir=session_dir,
-                batch_size=self._jsonl_writer.batch_size,
-                flush_interval=self._jsonl_writer.flush_interval
+                batch_size=batch_size,
+                flush_interval=flush_interval
             )
 
         # 创建 Session 对象（传递所有必要的依赖项）

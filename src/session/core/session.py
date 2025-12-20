@@ -30,7 +30,7 @@ class Session:
     单个会话对象
 
     表示一次 Agent 执行会话，负责收集消息、更新元数据和统计信息。
-    所有消息在内存中收集，会话结束时一次性写入磁盘。
+    支持实时消息推送和异步JSONL写入。
     """
 
     def __init__(
@@ -79,6 +79,8 @@ class Session:
         metadata_file = self.session_dir / "metadata.json"
         with open(metadata_file, 'w', encoding='utf-8') as f:
             json.dump(self.metadata, f, indent=2, ensure_ascii=False)
+
+        # JSONLWriter 在 __init__ 中已经自动启动了后台任务
 
         logger.info(f"会话已启动: {self.session_id}")
 
