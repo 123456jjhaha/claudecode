@@ -5,6 +5,29 @@ description: Use this skill when the user requests a prompt for the Claude Agent
 
 # Agent System Adaptation
 
+## CRITICAL: Multi-File Generation Strategy
+
+When generating prompts for Agent System (which often involves main + multiple sub-instances):
+
+**❌ DON'T**: Generate all prompts in one go
+- Main instance + 3 sub-instances = too much content
+- Quality degrades significantly
+- Hard to review and iterate
+
+**✅ DO**: Generate separately, one file at a time
+1. **First**: Generate main instance prompt → save to workspace/prompt_main.md
+2. **Then**: Generate each sub-instance prompt individually
+   - Sub-instance 1 → workspace/prompt_sub_analyzer.md
+   - Sub-instance 2 → workspace/prompt_sub_reviewer.md
+   - etc.
+
+**Workflow Integration**:
+- During requirements phase: Identify how many instances are needed
+- For EACH instance: Run the full generation → review → refinement cycle
+- Keep each prompt focused and high-quality
+
+---
+
 ## Core Principles to Include in Generated Prompts
 
 ### 1. Role Awareness (Main vs Sub Instance)
@@ -109,12 +132,28 @@ When generating prompts, ensure:
 
 ## Integration with Main Workflow
 
-During the prompt generation phases in `agent.md`:
+When user requests Agent System prompts, modify the workflow in `agent.md`:
 
-1. **Requirements Phase**: Ask user if this is for main or sub instance
-2. **Generation Phase**: Tell the 3 writer agents to include architecture sections
-3. **Review Phase**: Have optimizer agents check against the checklist above
-4. **Refinement Phase**: Strengthen file-based patterns if needed
+**Requirements Phase:**
+1. Ask: Is this for main instance, sub-instance, or a complete system (main + subs)?
+2. If complete system: Ask how many sub-instances and their roles
+3. **IMPORTANT**: Explain you'll generate one prompt at a time for quality
+
+**For Complete System (Main + Multiple Subs):**
+- **Iterate per instance**: Run full cycle (generate → review → refine) for EACH prompt
+- **Order**: Main instance first, then each sub-instance
+- **File naming**:
+  - workspace/prompt_main_v1.md, workspace/prompt_main_latest.md
+  - workspace/prompt_sub_{name}_v1.md, workspace/prompt_sub_{name}_latest.md
+
+**For Single Instance (Main OR Sub):**
+- Run normal workflow as defined in `agent.md`
+- Just ensure architecture sections are included
+
+**Generation/Review/Refinement Phases:**
+- Tell the 3 writer agents to include architecture sections
+- Have optimizer agents check against the checklist above
+- Strengthen file-based patterns if needed
 
 ## Example Snippets
 
