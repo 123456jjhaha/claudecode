@@ -260,8 +260,6 @@ instances/{instance_name}/.claude/
 ---
 name: prompt_writer_agent
 description: 专业的提示词书写智能体
-model: sonnet
-tools: Read, Write, Bash
 ---
 
 <role>
@@ -276,14 +274,9 @@ When given requirements, craft high-quality prompts...
 **关键配置项**：
 - `name`: 智能体名称
 - `description`: 描述（帮助 Claude 判断何时调用）
-- `model`: 使用的模型（sonnet/opus/haiku/inherit）
-- `tools`: 允许的工具列表
-- `permissionMode`: 权限模式
-- `skills`: 关联的技能
 
 **调用方式**：
 - 自动：Claude 根据任务自动选择合适的 agent
-- 手动：使用 Task tool 显式调用
 
 #### 2. skills/ - 技能（自动发现的能力）
 
@@ -316,9 +309,7 @@ Example usage...
 </examples>
 ```
 
-**与 agents 的区别**：
 - **Skills**：自动发现，模型决定使用，适合通用能力
-- **Agents**：显式调用，独立上下文，适合复杂任务
 
 #### 3. commands/ - 自定义斜杠命令
 

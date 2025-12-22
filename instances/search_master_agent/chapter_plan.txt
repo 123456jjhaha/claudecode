@@ -1,0 +1,86 @@
+# 成都两段式旅行计划报告章节计划
+
+## 报告结构（11个章节）
+
+### 1. 执行摘要 (chapter_01_executive_summary.md)
+- 概述整个两段式旅行计划
+- 主要亮点和特色
+- 基于需求文件的出行人员、季节、预算信息
+- 参考：requirements.txt
+
+### 2. 行程总览 (chapter_02_itinerary_overview.md)
+- 第一段停留（12月26-28日）时间安排
+- 第二段停留（12月29-30日）时间安排
+- 整体行程逻辑和节奏安排
+- 参考：requirements.txt, research_transportation.md
+
+### 3. 第一次停留详细计划 (chapter_03_first_stay_detailed.md)
+- 12月26日：到达日安排
+- 12月27日：完整一日游（大熊猫基地+其他景点）
+- 12月28日：上午活动+午饭后离开
+- 参考：research_attractions.md, research_transportation.md
+
+### 4. 第二次停留详细计划 (chapter_04_second_stay_detailed.md)
+- 12月29日：下午到达+活动安排
+- 12月30日：早上活动+机场出发
+- 参考：research_attractions.md, research_transportation.md
+
+### 5. 住宿推荐和预订建议 (chapter_05_accommodation.md)
+- 九眼桥区域经济住宿推荐
+- 预订技巧和价格建议
+- 情侣特色房型推荐
+- 参考：research_accommodation_bars.md
+
+### 6. 美食安排和餐厅推荐 (chapter_06_food_arrangements.md)
+- 串串和川菜餐厅推荐
+- 按区域分类的美食选择
+- 预算控制建议
+- 参考：research_food.md
+
+### 7. 交通指南和出行建议 (chapter_07_transportation_guide.md)
+- 地铁网络使用指南
+- 景点间交通时间估算
+- 打车和公交建议
+- 参考：research_transportation.md
+
+### 8. 情侣特色体验安排 (chapter_08_couples_experience.md)
+- 拍照地点推荐
+- 冬季特色活动
+- 浪漫行程建议
+- 参考：research_couples_experience.md
+
+### 9. 预算估算和消费建议 (chapter_09_budget_estimation.md)
+- 住宿、交通、门票、餐饮预算
+- 每日消费估算
+- 省钱技巧
+- 参考：所有研究文件的价格信息
+
+### 10. 冬季出行注意事项 (chapter_10_winter_tips.md)
+- 天气准备建议
+- 保暖措施
+- 冬季活动安排调整
+- 参考：research_transportation.md, research_couples_experience.md
+
+### 11. 实用贴士和应急准备 (chapter_11_practical_tips.md)
+- 必备物品清单
+- 应急联系方式
+- 健康安全建议
+- 参考：所有研究文件的实用信息
+
+## 章节生成顺序
+1. 执行摘要
+2. 行程总览
+3. 第一次停留详细计划
+4. 第二次停留详细计划
+5. 住宿推荐
+6. 美食安排
+7. 交通指南
+8. 情侣特色体验
+9. 预算估算
+10. 冬季出行注意事项
+11. 实用贴士
+
+## 最终合并
+- 使用Bash命令拼接所有章节文件
+- 添加标题页和目录
+- 最终文件：final_report_chengdu_travel_plan.md

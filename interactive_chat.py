@@ -12,6 +12,7 @@
 import asyncio
 import sys
 import os
+import json
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 
@@ -214,6 +215,140 @@ class MessageFormatter:
 
         return truncated + "..."
 
+    @staticmethod
+    def _format_user_message(content: str) -> str:
+        """格式化用户消息 - 处理工具结果等复杂内容"""
+        if not content:
+            return ""
+
+        # 尝试解析为JSON，如果是工具结果列表
+        try:
+            if content.startswith('[') and content.endswith(']'):
+                tool_results = json.loads(content)
+                if isinstance(tool_results, list):
+                    return MessageFormatter._format_tool_results_for_user(tool_results)
+        except (json.JSONDecodeError, Exception):
+            pass
+
+        # 如果不是工具结果，直接返回
+        return content
+
+    @staticmethod
+    def _format_tool_results_for_user(tool_results: list) -> str:
+        """为用户格式化工具结果列表"""
+        if not tool_results:
+            return ""
+
+        formatted_parts = []
+
+        for result in tool_results:
+            if not isinstance(result, dict):
+                continue
+
+            result_type = result.get('type')
+            content = result.get('content')
+
+            if result_type == 'tool_result' and content:
+                # 提取有用的文本内容
+                text_content = MessageFormatter._extract_text_from_tool_result(content)
+                if text_content:
+                    formatted_parts.append(text_content)
+
+        # 如果有多个结果，用换行连接
+        if formatted_parts:
+            return '\n'.join(formatted_parts)
+
+        # 如果无法解析，返回简单的描述
+        return f"[工具执行完成，返回了 {len(tool_results)} 个结果]"
+
+    @staticmethod
+    def _extract_text_from_tool_result(content) -> str:
+        """从工具结果中提取文本内容"""
+        if isinstance(content, str):
+            return MessageFormatter._extract_text_from_json_string(content)
+
+        if isinstance(content, list):
+            text_parts = []
+            for item in content:
+                if isinstance(item, dict) and item.get('type') == 'text':
+                    text_parts.append(MessageFormatter._extract_text_from_json_string(item.get('text', '')))
+                elif isinstance(item, str):
+                    text_parts.append(item[:100] + "..." if len(item) > 100 else item)
+            return '\n'.join(text_parts) if text_parts else ""
+
+        if isinstance(content, dict):
+            # 尝试提取有用的字段
+            useful_fields = ['result', 'data', 'message', 'text', 'content']
+            for field in useful_fields:
+                if field in content:
+                    value = content[field]
+                    if isinstance(value, str):
+                        return MessageFormatter._extract_text_from_json_string(value)
+                    elif isinstance(value, (list, dict)):
+                        return str(value)[:100] + "..." if len(str(value)) > 100 else str(value)
+
+        return str(content)[:100] + "..." if len(str(content)) > 100 else str(content)
+
+    @staticmethod
+    def _extract_text_from_json_string(json_str: str) -> str:
+        """从JSON字符串中提取有用的文本"""
+        try:
+            data = json.loads(json_str)
+
+            # 如果包含搜索结果，提取关键信息
+            if isinstance(data, dict):
+                # 处理地理位置搜索结果
+                if 'pois' in data:
+                    pois = data.get('pois', [])
+                    if pois:
+                        # 显示前几个POI的名称
+                        poi_names = [poi.get('name', '') for poi in pois[:3] if poi.get('name')]
+                        if poi_names:
+                            result = f"找到 {len(pois)} 个地点，包括: {', '.join(poi_names)}"
+                            if len(pois) > 3:
+                                result += f" 等{len(pois)}个结果"
+                            return result
+
+                # 处理文本搜索结果
+                if 'results' in data:
+                    results = data.get('results', [])
+                    if results:
+                        # 显示前几个结果的标题
+                        titles = [r.get('title', '') for r in results[:3] if r.get('title')]
+                        if titles:
+                            result = f"找到 {len(results)} 个结果，包括: {', '.join(titles)}"
+                            if len(results) > 3:
+                                result += f" 等{len(results)}个结果"
+                            return result
+
+                # 检查其他有用字段
+                useful_fields = ['text', 'content', 'message', 'summary', 'result']
+                for field in useful_fields:
+                    if field in data and isinstance(data[field], str):
+                        text = data[field]
+                        if len(text) <= 150:
+                            return text
+                        else:
+                            return text[:150] + "..."
+
+                # 如果没有找到合适的字段，返回简化的描述
+                return "[搜索结果已获取]"
+
+            return str(data)[:100] + "..." if len(str(data)) > 100 else str(data)
+
+        except (json.JSONDecodeError, Exception):
+            # 如果不是JSON，直接返回截断的文本
+            text = json_str.strip()
+            if len(text) <= 150:
+                return text
+            else:
+                # 尝试在句子边界截断
+                for separator in ['。', '！', '？', '.', '!', '?', '\n']:
+                    pos = text.rfind(separator, 0, 150)
+                    if pos > 50:  # 确保截断位置不太靠前
+                        return text[:pos+1]
+                return text[:150] + "..."
+
 
 class MessageHandler:
     """消息处理器 - 简化输出"""
@@ -225,7 +360,8 @@ class MessageHandler:
 
             if msg_type == 'UserMessage':
                 content = msg.get('data', {}).get('content', '')
-                print(f"\n👤 你: {content}")
+                formatted_content = MessageFormatter._format_user_message(content)
+                print(f"\n👤 你: {formatted_content}")
 
             elif msg_type == 'AssistantMessage':
                 print(f"\n🤖 AI回复:")
@@ -251,7 +387,8 @@ class MessageHandler:
 
             if msg_type == 'UserMessage':
                 content = msg.get('data', {}).get('content', '')
-                print(f"\n   👤 [{instance_name}] 用户: {content}")
+                formatted_content = MessageFormatter._format_user_message(content)
+                print(f"\n   👤 [{instance_name}] 用户: {formatted_content}")
 
             elif msg_type == 'AssistantMessage':
                 print(f"\n   🤖 [{instance_name}] 回复:")

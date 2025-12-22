@@ -1,6 +1,6 @@
 # 实时消息总线配置（全局共享）
 redis:
-  url: "redis://localhost:6379"
+  url: "redis://localhost:6378"
   db: 0
   max_connections: 50
 

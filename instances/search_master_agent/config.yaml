@@ -36,7 +36,6 @@ tools:
     - "WebSearch"     # 禁止网页搜索（由子智能体处理）
     - "KillShell"     # 禁止杀死 shell 进程
     - "Skill"         # 禁止技能调用
-    - "SlashCommand"  # 禁止斜杠命令
     # - "mcp__ide__*"   # 禁用IDE相关MCP工具
 
   # 允许的 MCP 工具
