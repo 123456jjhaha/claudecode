@@ -14,7 +14,7 @@ import re
 import yaml
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any,Optional
 from functools import wraps
 from dotenv import load_dotenv
 
@@ -45,11 +45,11 @@ class ConfigManager:
 
     OPTIONAL_FIELDS = {
         "system_prompt_file": str,
-        "cwd": str,
         "tools": dict,
         "sub_claude_instances": dict,
         "advanced": dict,
         "session_recording": dict,
+        "workspace": dict,
     }
 
     # 子字段验证规则
@@ -79,6 +79,16 @@ class ConfigManager:
         "message_types": (list, False),
         "include_content": (bool, False),
         "include_metadata": (bool, False),
+    }
+
+    WORKSPACE_FIELDS = {
+        "enabled": (bool, False),
+        "auto_create": (bool, False),
+        "retention_days": (int, False),
+        "init_message": (bool, False),
+        "init_message_template": (str, False),
+        "max_size_mb": (int, False),
+        "warn_size_mb": (int, False),
     }
 
     def __init__(self, instance_path: Path | str):
@@ -264,6 +274,9 @@ class ConfigManager:
         if "session_recording" in config:
             self._validate_session_recording(config["session_recording"])
 
+        if "workspace" in config:
+            self._validate_workspace(config["workspace"])
+
         # 检查提示词文件名建议
         if "system_prompt_file" in config:
             self._check_prompt_file_name(config["system_prompt_file"])
@@ -328,9 +341,17 @@ class ConfigManager:
             raise ConfigError(f"无法加载提示词文件 '{file_path}': {e}")
 
     @require_config_loaded
-    def get_claude_options_dict(self) -> dict[str, Any]:
+    def get_claude_options_dict(
+        self,
+        session_id: Optional[str] = None,
+        workspace_manager: Optional[Any] = None
+    ) -> dict[str, Any]:
         """
         生成 ClaudeAgentOptions 参数字典
+
+        Args:
+            session_id: 会话 ID（用于工作目录）
+            workspace_manager: 工作空间管理器（可选）
 
         Returns:
             ClaudeAgentOptions 参数字典
@@ -370,14 +391,35 @@ class ConfigManager:
             # 如果没有找到任何提示词文件，使用默认提示词
             if not prompt_loaded:
                 default_prompt = self._get_default_system_prompt()
-                options["system_prompt"] = default_prompt
+                system_prompt = default_prompt
                 logger.info("使用默认系统提示词")
-
-            # 工作目录
-            if "cwd" in self._config:
-                options["cwd"] = str(self.resolve_path(self._config["cwd"]))
             else:
+                system_prompt = options["system_prompt"]
+
+            # 🌟 工作目录配置（强制使用 workspace）
+            if workspace_manager and session_id:
+                # 创建工作目录
+                workspace_path = workspace_manager.create_workspace(session_id)
+
+                if workspace_path:
+                    # 设置 cwd 为工作目录
+                    options["cwd"] = str(workspace_path)
+
+                    # 在 system_prompt 中注入工作目录信息
+                    if workspace_manager.config.get("init_message", True):
+                        workspace_info = workspace_manager.get_workspace_info_message(session_id)
+                        # 在原始 system_prompt 前面添加工作目录信息
+                        system_prompt = f"{workspace_info}\n\n---\n\n{system_prompt}"
+                        logger.debug("已注入工作目录信息到 system prompt")
+                else:
+                    # workspace 创建失败，使用实例目录作为后备
+                    options["cwd"] = str(self.instance_path)
+            else:
+                # 没有 workspace_manager 或 session_id，使用实例目录
                 options["cwd"] = str(self.instance_path)
+
+            # 设置 system_prompt
+            options["system_prompt"] = system_prompt
 
             # 工具配置
             if "tools" in self._config:
@@ -587,6 +629,39 @@ class ConfigManager:
                         f"无效的消息类型: {msg_type}，有效值为: {', '.join(valid_types)} 或 None（记录所有类型）",
                         field="session_recording.message_types"
                     )
+
+    def _validate_workspace(self, workspace_config: dict[str, Any]) -> None:
+        """验证 workspace 配置"""
+        for field, (expected_type, _) in self.WORKSPACE_FIELDS.items():
+            if field in workspace_config:
+                value = workspace_config[field]
+                if not isinstance(value, expected_type):
+                    raise ConfigValidationError(
+                        f"类型错误，期望 {expected_type.__name__}，实际为 {type(value).__name__}",
+                        field=f"workspace.{field}"
+                    )
+
+        # 验证数值范围
+        if "retention_days" in workspace_config:
+            if workspace_config["retention_days"] < 1:
+                raise ConfigValidationError(
+                    "retention_days 必须大于 0",
+                    field="workspace.retention_days"
+                )
+
+        if "max_size_mb" in workspace_config:
+            if workspace_config["max_size_mb"] < 1:
+                raise ConfigValidationError(
+                    "max_size_mb 必须大于 0",
+                    field="workspace.max_size_mb"
+                )
+
+        if "warn_size_mb" in workspace_config:
+            if workspace_config["warn_size_mb"] < 1:
+                raise ConfigValidationError(
+                    "warn_size_mb 必须大于 0",
+                    field="workspace.warn_size_mb"
+                )
 
     def _validate_server_config(self, server_name: str, server_type: str, config: dict[str, Any]) -> bool:
         """验证 MCP 服务器配置的完整性"""

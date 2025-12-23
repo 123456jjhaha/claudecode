@@ -115,6 +115,9 @@ class AgentSystem:
         # 会话管理
         self.session_manager: SessionManager | None = None
 
+        # 🌟 工作空间管理器
+        self.workspace_manager: Optional[Any] = None
+
         # 配置和选项
         self._config: dict | None = None
         self._options: ClaudeAgentOptions | None = None
@@ -201,6 +204,19 @@ class AgentSystem:
                 options_dict["mcp_servers"] = all_mcp_servers
                 logger.info(f"配置了 {len(all_mcp_servers)} 个 MCP 服务器")
 
+            # 8.5. 🌟 初始化工作空间管理器（强制启用）
+            workspace_config = self._config.get("workspace", {})
+            # 设置默认值（强制启用）
+            if "enabled" not in workspace_config:
+                workspace_config["enabled"] = True
+
+            from .workspace import WorkspaceManager
+            self.workspace_manager = WorkspaceManager(
+                self.instance_path,
+                workspace_config
+            )
+            logger.info("工作空间管理器已初始化")
+
             # 9. 创建会话管理器（传递 MessageBus）
             logger.info("初始化会话记录...")
             self.session_manager = SessionManager(
@@ -246,8 +262,31 @@ class AgentSystem:
         logger.info(f"执行查询... (record_session={record_session}, resume={resume_session_id}, parent={parent_session_id})")
 
         try:
-            # 准备查询选项
-            query_options = self._options
+            # 🌟 workspace 强制启用：先确定 session_id，然后生成特定的 options
+            # 1. 确定 session_id（新建或恢复）
+            if resume_session_id:
+                session_id_for_workspace = resume_session_id
+            else:
+                # 创建新的 session_id（提前生成）
+                from .session.utils import generate_session_id
+                session_id_for_workspace = generate_session_id()
+
+            # 2. 用 session_id 生成 options（包含工作目录）
+            options_dict = self.config_loader.get_claude_options_dict(
+                session_id=session_id_for_workspace,
+                workspace_manager=self.workspace_manager
+            )
+
+            # 移除内部使用的自定义字段
+            options_dict.pop("_sub_instances_config", None)
+            options_dict.pop("_session_recording_config", None)
+
+            # 设置 MCP 服务器配置（复用已启动的服务器）
+            if self._options.mcp_servers:
+                options_dict["mcp_servers"] = self._options.mcp_servers
+
+            query_options = ClaudeAgentOptions(**options_dict)
+
             # 如果有 resume_session_id，需要提取Claude的session_id并恢复会话
             if resume_session_id:
                 claude_session_id = self.session_manager.get_claude_session_id(resume_session_id)
@@ -270,7 +309,8 @@ class AgentSystem:
                 prompt=prompt,
                 resume_session_id=resume_session_id,
                 parent_session_id=parent_session_id,  # 传递父会话 ID
-                instance_path=str(self.instance_path)  # 传递实例路径
+                instance_path=str(self.instance_path),  # 传递实例路径
+                pregenerated_session_id=session_id_for_workspace  # 🌟 传递预生成的 ID
             )
 
             # 初始化 session（创建或恢复会话）

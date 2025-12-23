@@ -1,0 +1,8 @@
+这是一个测试文件，用于验证Claude Code的工作空间隔离功能。
+
+创建时间：2025年12月21日
+创建者：search_master_agent实例
+会话ID：20251221T205736_4929_89ddab18
+工作路径：C:\Users\Lenovo\Desktop\ai_system\claudecode\instances\search_master_agent\sessions\20251221T205736_4929_89ddab18\workspace
+
+如果你能看到这个文件，说明工作空间隔离功能正常工作！

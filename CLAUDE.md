@@ -14,6 +14,7 @@
 - 🔄 **递归子实例** - 子实例作为工具，支持无限层级嵌套
 - ✨ **自动父子关联** - parent_session_id 自动传递，对 Claude 完全透明
 - 📡 **子实例实时追踪** - 子实例启动时即刻通知，支持实时消息订阅
+- 🗂️ **工作空间隔离** - 每个会话自动创建独立工作目录，避免文件污染
 - ⚡ **无状态设计** - 支持并发查询，线程安全
 - 📊 **智能会话记录** - 自动记录所有对话，支持层级化存储和查询
 - 🔁 **Resume 多轮对话** - 支持恢复之前的会话
@@ -133,7 +134,30 @@ class SessionQuery:
 
 详细说明：[子实例系统](docs/sub-instances.md)
 
-### 7. 配置驱动的实例管理
+### 7. 工作空间隔离系统
+
+**核心理念**：每个会话（session）自动创建独立的工作目录，实现完全的文件隔离。
+
+**关键特性**：
+- ✨ **自动创建**：每次 `query()` 调用时，系统自动为该会话创建独立的工作目录
+- ✨ **系统提示注入**：在 system prompt 中自动告知 Claude 其专属工作目录位置
+- ✨ **固定目录结构**：`instances/{name}/sessions/{session_id}/workspace/`
+- ✨ **Resume 支持**：恢复会话时使用原有工作目录，保持文件连续性
+
+**设计原则**：
+- 隔离性：每个会话独立的文件空间，避免污染
+- 自动化：系统自动创建和管理，无需用户干预
+- 透明性：通过 system prompt 告知 Claude，对用户透明
+- 持久性：工作目录随会话保存，支持手动清理
+
+**工作流程**：
+```
+query() → 生成 session_id → 创建工作目录 → 注入 system prompt → Claude 执行
+```
+
+详细说明：[工作空间隔离指南](docs/workspace-guide.md)
+
+### 8. 配置驱动的实例管理
 
 **核心理念**：每个实例都是独立的，通过配置文件定义其行为和特性。
 
@@ -168,6 +192,11 @@ instances/
     ├── agent.md             # 实例的提示词文档
     └── sessions/             # 会话记录目录（自动创建）
         └── {session_id}/     # 每个会话的独立目录
+            ├── workspace/    # 🌟 会话工作空间（自动创建）
+            │   ├── .workspace_info.json  # 工作空间元数据
+            │   └── ...       # Claude 创建的所有文件
+            ├── session.jsonl # 会话消息记录
+            └── metadata.json # 会话元数据
 ```
 
 ### 子实例 vs Claude Code Agents（重要概念区分）
@@ -454,6 +483,9 @@ claude_agent_system/
 │   │       ├── query_helpers.py    # 查询辅助函数
 │   │       ├── session_context.py  # 上下文管理
 │   │       └── instance_utils.py   # 实例工具
+│   ├── workspace/                   # 🗂️ 工作空间隔离系统
+│   │   ├── workspace_manager.py    # WorkspaceManager 核心管理
+│   │   └── __init__.py             # 模块导出
 │   ├── mcp_server/                  # MCP 服务器模块
 │   ├── agent_system.py             # 系统主类
 │   ├── config_manager.py           # 配置管理
@@ -468,10 +500,15 @@ claude_agent_system/
 │
 ├── docs/                           # 文档目录
 │   ├── session-guide.md           # ⭐ 会话系统完整指南
-│   ├── session-subscriber-guide.md # SessionQuery 详细使用指南
+│   ├── session-query-guide.md     # SessionQuery 详细使用指南
+│   ├── workspace-guide.md         # 🗂️ 工作空间隔离指南
 │   ├── configuration.md           # 配置指南
 │   ├── tool-development.md        # 工具开发指南
 │   ├── sub-instances.md           # 子实例系统
+│   └── ...
+│
+├── scripts/                        # 工具脚本
+│   ├── cleanup_workspaces.py      # 工作空间清理工具
 │   └── ...
 │
 ├── streaming.yaml                 # 实时消息配置（可选）
@@ -602,6 +639,7 @@ query.export_session("session_id", Path("export.json"), format="json")
 - [消息处理与显示指南](docs/message-handling-guide.md) 📨 - 正确处理和显示系统消息的完整指南
 - [会话系统完整指南](docs/session-guide.md) - 会话管理和查询完整指南
 - [SessionQuery 迁移指南](docs/session-migration-guide) 🔄 - 从旧架构平滑迁移
+- [工作空间隔离指南](docs/workspace-guide.md) 🗂️ - 每个会话的独立工作空间管理
 - [配置指南](docs/configuration.md) - 完整的配置选项说明
 - [工具开发指南](docs/tool-development.md) - 创建自定义工具
 - [子实例系统](docs/sub-instances.md) - 子实例的使用和配置

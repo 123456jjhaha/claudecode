@@ -83,7 +83,8 @@ class SessionManager:
         self,
         initial_prompt: str,
         context: Optional[dict] = None,
-        parent_session_id: Optional[str] = None
+        parent_session_id: Optional[str] = None,
+        session_id: Optional[str] = None  # 🌟 新增：支持预生成的 session_id
     ) -> Session:
         """
         创建新会话
@@ -93,6 +94,7 @@ class SessionManager:
             context: 额外的上下文信息
             parent_session_id: 父会话 ID（用于追踪调用链）
                 **重要**：对于子实例调用，必须传递此参数以建立父子关系
+            session_id: 预生成的会话 ID（可选，用于 workspace 等需要提前知道 ID 的场景）
 
         Returns:
             Session 对象
@@ -102,8 +104,11 @@ class SessionManager:
             logger.info("会话记录未启用")
             return None
 
-        # 生成会话 ID
-        session_id = generate_session_id()
+        # 生成会话 ID（如果未提供）
+        if session_id is None:
+            session_id = generate_session_id()
+        else:
+            logger.debug(f"使用预生成的 session_id: {session_id}")
 
         # 会话目录（总是在当前实例的 sessions/ 目录下）
         session_dir = self.sessions_dir / session_id

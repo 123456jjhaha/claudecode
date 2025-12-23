@@ -1,0 +1,23 @@
+{
+  "session_id": "20251221T204753_2920_a0ee23d2",
+  "instance_name": "search_master_agent",
+  "start_time": "2025-12-21T20:47:53.696815",
+  "end_time": "2025-12-21T20:47:58.248433",
+  "status": "completed",
+  "prompts": [
+    {
+      "prompt": "你当前的worksapce在哪里",
+      "timestamp": "2025-12-21T20:47:53.696815"
+    }
+  ],
+  "results": [
+    {
+      "result": "API Error: 403 {\"error\":{\"type\":\"forbidden\",\"message\":\"Request not allowed\"}} · Please run /login",
+      "timestamp": "2025-12-21T20:47:58.248995",
+      "is_error": true
+    }
+  ],
+  "depth": 0,
+  "parent_session_id": null,
+  "context": {}
+}

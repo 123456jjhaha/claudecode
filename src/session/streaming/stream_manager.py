@@ -51,7 +51,8 @@ class QueryStreamManager:
         prompt: Optional[str] = None,
         resume_session_id: Optional[str] = None,
         parent_session_id: Optional[str] = None,
-        instance_path: Optional[str] = None
+        instance_path: Optional[str] = None,
+        pregenerated_session_id: Optional[str] = None  # 🌟 新增：预生成的 session_id
     ):
         """
         初始化流管理器
@@ -64,6 +65,7 @@ class QueryStreamManager:
             resume_session_id: 要恢复的会话 ID
             parent_session_id: 父会话 ID（用于子实例调用）
             instance_path: 实例路径（用于 SessionContext）
+            pregenerated_session_id: 预生成的 session_id（用于 workspace）
         """
         self.stream = stream
         self.session_manager = session_manager
@@ -72,6 +74,7 @@ class QueryStreamManager:
         self.resume_session_id = resume_session_id
         self.parent_session_id = parent_session_id
         self.instance_path = instance_path
+        self.pregenerated_session_id = pregenerated_session_id  # 🌟 保存预生成的 ID
         self.session = None  # 实际的 Session 对象
         self._finalized = False  # 防止双重 finalize
         self._context_token: Optional[Token] = None  # 保存上下文令牌
@@ -98,11 +101,12 @@ class QueryStreamManager:
                 await self.session.start()  # 启动会话（确保JSONLWriter后台任务运行）
                 logger.info(f"[StreamManager] Resume and started session: {self.resume_session_id}")
             else:
-                # 创建新会话
+                # 创建新会话（可能使用预生成的 session_id）
                 self.session = await self.session_manager.create_session(
                     initial_prompt=self.prompt or "",
                     context={},
-                    parent_session_id=self.parent_session_id  # 传递父会话 ID
+                    parent_session_id=self.parent_session_id,  # 传递父会话 ID
+                    session_id=self.pregenerated_session_id  # 🌟 传递预生成的 ID（如果有）
                 )
                 logger.info(f"[StreamManager] Created new session: {self.session.session_id}, parent: {self.parent_session_id}")
 
