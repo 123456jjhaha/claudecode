@@ -1,0 +1,10 @@
+# 实时消息总线配置（全局共享）
+redis:
+  url: "redis://localhost:6378"
+  db: 0
+  max_connections: 50
+
+# 异步写入配置（全局默认值）
+async_write:
+  batch_size: 10
+  flush_interval: 1.0

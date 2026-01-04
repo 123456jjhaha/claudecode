@@ -1,0 +1,12 @@
+请你帮我写一个去成都旅游的计划，我们大概会在成都待一个晚上（坐火车6.30东站），一整个白天，还有一个半天（吃完饭以后就走了）。后面又回过来，待一个晚上（估计坐火车下午到）。
+请你帮我规划一下旅程。
+我出行方式到达都是火车，最后回来的那天晚上的第二天需要去双流坐飞机。（时间还比较充裕，早上10点起飞）
+请你根据我这些需求设计一个计划，我还有点想要去找个酒吧待一待
+我的行程是分两段的！两次不同的成都停留。我希望有美食和人文景观（杜甫草堂？或者说大熊猫？）酒吧的话，我看九眼桥附近有一条街。我2个人，情侣。住宿和交通、景点我希望非常贴合，比较方便，近！规划不要太紧。同时具体景点的特色和游玩方式也需要详细
+两次很相近，就隔几天。冬日。目前是2025年12月20日，我希望可能是2025年12月26日到达，28日中午走，29日下午晚回到成都。预算200左右。近是指所有规划都合理，方便我最好。酒吧当然安排在晚上！可能帮我推荐一个情侣特色的景点（其实大熊猫我就觉得还可以）美食的话，串串。川菜（街边的，社区的老餐馆，不要那种网红店）我其实对经典经典还蛮感兴趣。（但是完整一天的上午肯定要去大熊猫基地）
+
+tips:
+如果你使用task工具遇到这样的报错，"API Error: 500 {\"error\":{\"message\":\"Error calling litellm.acompletion for non-Anthropic model: litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: OpenAIException - 'max_tokens' or 'max_completion_tokens' is too large: 21333. This model's maximum context length is 128000 tokens and your request has 107383 input tokens (21333 > 128000 - 107383). None\",\"type\":\"None\",\"param\":\"None\",\"code\":\"500\"}}"}, {"type": "text", "text": "agentId: a85782d (for resuming to continue this agent's work if needed)"}], "is_error": null}]}}
+请你根据最后返回的agent id ，继续使用task工具，调用该子智能体！但是需要告诉他，首先使用/compact 命令压缩上下文！然后再继续执行任务
+我建议你先创建一个chengdu_workspace。然后写计划的时候，路径一定不要直接是/（这是根目录啊！！一定要加.
+使用task工具调用搜索子智能体的时候，禁止给它复杂任务，他只能搜索一个主题（他只是一个简单的工具！而不能作为一个整个复杂任务的执行器，需要你一步一步制定计划，多次多轮根据返回最后解决掉这个复杂任务）

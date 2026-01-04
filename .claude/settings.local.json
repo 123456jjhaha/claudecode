@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"C:\\Users\\Lenovo\\Desktop\\test2\\claudecode\\instances\\demo_agent\\sessions\\20251213T121528_2117_3f086c8f\\subsessions\")",
+      "Bash(python:*)",
+      "Bash(find:*)"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "web_server": {
+      "type": "http",
+      "url": "http://localhost:3005/mcp"
+    },
+    "gaode": {
+      "type": "http",
+      "url": "https://mcp.amap.com/mcp?key=082b41d828f1bd5d3f74a0f0805a6867"
+    }
+  }
+}

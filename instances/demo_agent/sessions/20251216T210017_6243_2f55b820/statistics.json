@@ -1,0 +1,30 @@
+{
+  "session_id": "20251216T210017_6243_2f55b820",
+  "total_duration_ms": 4626,
+  "api_duration_ms": 4499,
+  "num_turns": 2,
+  "num_messages": 5,
+  "num_tool_calls": 1,
+  "tools_used": {
+    "mcp__custom_tools__calculator__add": 1
+  },
+  "subsessions": [],
+  "token_usage": {
+    "input_tokens": 210,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 33920,
+    "output_tokens": 89,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    }
+  },
+  "cost_usd": 0.012140999999999999,
+  "final_status": "completed",
+  "error_count": 0
+}

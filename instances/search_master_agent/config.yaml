@@ -1,0 +1,186 @@
+# Claude Agent System - AI搜索系统实例
+#
+# 本配置文件配置了基于三层智能体架构的AI搜索系统：
+# - 主智能体：搜索协调者和开源情报大师
+# - 子智能体：搜索执行专家和写作智能体
+# - 专业的情报搜集和综合分析能力
+# - 完整的迭代优化和质量控制体系
+
+# ==================== 基础配置 ====================
+agent:
+  name: "search_master_agent"
+  description: "基于深度需求分析和多轮专业优化的三层AI搜索系统，专为开源情报搜集和综合分析而设计"
+
+# 模型选择（可选项：claude-sonnet-4-5, claude-opus-4-5, claude-haiku-4）
+model: "claude-sonnet-4-5"
+
+# 系统提示词文件（相对于实例目录）
+# 推荐使用 agent.md 以避免与 Claude Code 的 CLAUDE.md 冲突
+system_prompt_file: ".claude/agent.md"
+
+# 工作目录（默认为实例目录）
+cwd: "."
+
+# ==================== 工具权限配置 ====================
+#
+# 重要说明：
+# 1. 内置的 Claude 工具（如 Read, Write, Bash 等）默认全部允许
+# 2. 要禁止某个内置工具，必须在 disallowed 中明确列出
+# 3. allowed 列表主要用于限制 MCP 工具（自定义工具、外部 MCP、子实例）
+# 4. 通配符 * 可以用于模式匹配
+
+tools:
+  # 明确禁止使用的内置工具（主智能体只使用Task工具调用子智能体）
+  disallowed:
+    - "WebFetch"      # 禁止网页获取（由子智能体处理）
+    - "WebSearch"     # 禁止网页搜索（由子智能体处理）
+    - "KillShell"     # 禁止杀死 shell 进程
+    - "Skill"         # 禁止技能调用
+    # - "mcp__ide__*"   # 禁用IDE相关MCP工具
+
+  # 允许的 MCP 工具
+  allowed:
+    # Task工具用于调用Claude Code的子智能体
+    - "Task"                      # 核心工具：用于调用搜索专家和写作智能体
+    # 基础文件操作工具（用于文件管理和读取结果）
+    - "Read"                      # 读取子智能体生成的文件
+    - "Write"                     # 保存需求文件和进度跟踪
+    - "Glob"                      # 文件查找和管理
+    - "Grep"                      # 搜索文件内容
+
+    # 会话管理和查询工具
+    - "mcp__session_query__*"     # 会话查询和管理
+    - "mcp__message_bus__*"       # 实时消息处理
+
+    # Web服务器MCP工具
+    - "mcp__web_server__*"        # Web搜索和页面获取工具
+    - "mcp__gaode__*" 
+# ==================== 子实例配置 ====================
+#
+# 本系统使用Claude Code的子智能体（agents），而非传统子实例
+# 子智能体定义在 .claude/agents/ 目录中，每个都是独立的智能体角色
+#
+# 可用的子智能体：
+# - search_specialist: 搜索执行专家，精通5个专业搜索工具
+# - writing_analyst: 写作智能体，专业情报分析和报告生成
+#
+# 调用方式：
+# Task tool -> subagent_type='general-purpose' -> search_specialist
+# Task tool -> subagent_type='general-purpose' -> writing_analyst
+#
+# 注：这里保留空的sub_claude_instances配置，因为本系统主要使用Claude Code agents
+sub_claude_instances: {}
+# ==================== 会话记录配置 ====================
+#
+# 会话记录系统：消息在内存中收集，会话结束时一次性写入磁盘
+# 设计原则：KISS（Keep It Simple, Stupid），避免过早优化
+session_recording:
+  # 基础开关
+  enabled: true                    # 是否启用会话记录
+
+  # 存储管理策略
+  retention_days: 30               # 保留天数（超过此天数会被自动清理）
+  max_total_size_mb: 1000          # 最大总大小（MB，超过会触发清理）
+  auto_cleanup: true               # 是否自动清理过期会话
+
+  # 消息过滤（精确控制记录哪些消息类型）
+  # null 表示记录所有类型（推荐），包括 UserMessage, AssistantMessage,
+  # ResultMessage, SystemMessage, StreamEvent
+  message_types: null              # 记录所有消息类型
+
+  # 或者只记录特定类型（不推荐，除非需要节省存储空间）：
+  # message_types:
+  #   - "UserMessage"       # 用户消息
+  #   - "AssistantMessage"  # AI 助手消息（包含工具调用、思考过程等）
+  #   - "ResultMessage"     # 结果消息（包含统计信息）
+  #   - "SystemMessage"     # 系统消息
+  #   - "StreamEvent"       # 流事件
+
+  # 内容控制
+  include_content: true            # 是否包含消息内容（设为 false 可节省空间）
+  include_metadata: true           # 是否包含元数据（时间戳、序列号等）
+
+# ==================== 高级配置 ====================
+advanced:
+  # 权限模式
+  # permission_mode: "acceptEdits"    # 可选值：default, acceptEdits, plan, bypassPermissions
+  permission_mode: "bypassPermissions"  # 改为这个，跳过权限检查
+  # 执行限制
+  max_turns: 1000                    # 最大对话轮次
+
+  # 配置源优先级
+  setting_sources:
+    - "project"                    # 项目级配置优先
+
+  # 环境变量（传递给子进程）
+  env:
+    # ==================== SDK 超时配置 ====================
+    #
+    # 说明：这些环境变量用于控制 Claude SDK 的超时行为，避免子实例执行时崩溃
+    #
+    # 1. CLAUDE_CODE_STREAM_CLOSE_TIMEOUT:
+    #    作用：控制 SDK 等待第一个结果的超时时间（毫秒）
+    #    默认：60000ms (60秒)
+    #    问题：如果子实例在 60 秒内没有返回第一个结果，SDK 会强制关闭流，导致子实例崩溃
+    #    建议：设置为 300000ms (5分钟)，给子实例充足的执行时间
+    #
+    # 2. MCP_TIMEOUT:
+    #    作用：MCP 服务器启动超时时间（毫秒）
+    #    默认：30000ms (30秒)
+    #    说明：启动子实例的 MCP 服务器时的等待时间
+    #    建议：设置为 120000ms (2分钟)，给复杂的服务器更多启动时间
+    #
+    # 3. MCP_TOOL_TIMEOUT:
+    #    作用：单个 MCP 工具执行超时时间（毫秒）
+    #    默认：可能存在 bug，不一定生效
+    #    说明：控制工具执行的超时时间
+    #    建议：设置为 180000ms (3分钟)，作为额外的保障
+    #
+    CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "3000000"  # 5分钟 - 避免SDK强制关闭流
+    MCP_TIMEOUT: "120000"                       # 2分钟 - MCP服务器启动超时
+    MCP_TOOL_TIMEOUT: "1800000"                  # 3分钟 - MCP工具执行超时
+
+    # 其他可选的环境变量配置
+    # PYTHONPATH: "."
+    # DEMO_MODE: "true"
+
+  # 额外的目录访问权限（添加到工作目录）
+  add_dirs:
+    - "./output"                   # 允许访问输出目录
+    - "./workspace"                # AI搜索系统工作目录
+
+# ==================== 配置说明总结 ====================
+#
+# 1. 系统架构：
+#    - 主智能体：负责需求澄清、策略制定、任务协调、结果综合
+#    - 搜索专家：使用5个专业工具执行搜索任务，结构化保存结果
+#    - 写作智能体：基于搜索结果生成专业报告，分章节确保质量
+#
+# 2. 工具权限：
+#    - 主智能体只使用Task工具调用子智能体，禁用直接搜索工具
+#    - 搜索专家拥有完整搜索工具集（searxng_search, analyze_pages等）
+#    - 写作智能体专注文件操作和内容生成
+#    - Web服务器MCP：提供额外的网页搜索和获取能力
+#
+# 3. 工作流程：
+#    Phase 1: 深度需求澄清（反复询问直到完全理解）
+#    Phase 2: 战略规划（制定搜索策略和任务分解）
+#    Phase 3: 任务编排（并行调用搜索专家执行搜索）
+#    Phase 4: 分析综合（读取结果，验证质量，识别缺口）
+#    Phase 5: 迭代优化（根据结果补充搜索，提升置信度）
+#    Phase 6: 报告协调（调用写作智能体生成专业报告）
+#
+# 4. 质量控制：
+#    - 量化指标：置信度≥70%，完整度≥95%
+#    - 验证要求：关键声明需3个以上独立来源
+#    - 迭代限制：每种查询类型最多5次迭代
+#    - 时间管理：简单5分钟，复杂30分钟，深度2小时
+#
+# 5. MCP服务器：
+#    - web_server: 本地HTTP服务器（localhost:3005），提供Web搜索和页面获取工具
+#    - 工具前缀：mcp__web_server__*
+#
+# 6. 会话记录：
+#    - 记录所有消息类型，包括子智能体的执行过程
+#    - 自动生成调用关系图和性能统计
+#    - 支持导出和历史查询
